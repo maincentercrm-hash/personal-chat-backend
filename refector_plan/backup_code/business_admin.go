@@ -1,108 +1,29 @@
-// interfaces/api/middleware/business_admin.go
-package middleware
+// domain/models/business_admin.go
+
+package models
 
 import (
-	"github.com/gofiber/fiber/v2"
-	"github.com/thizplus/gofiber-chat-api/domain/service"
-	"github.com/thizplus/gofiber-chat-api/pkg/utils"
+	"time"
+
+	"github.com/google/uuid"
 )
 
-// CheckBusinessAdmin middleware ตรวจสอบว่าผู้ใช้เป็นแอดมินของธุรกิจ
-func CheckBusinessAdmin(businessAdminService service.BusinessAdminService) fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		// ดึง userID จาก middleware ก่อนหน้า
-		userID, err := GetUserUUID(c)
-		if err != nil {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"success": false,
-				"message": "Unauthorized: " + err.Error(),
-			})
-		}
+// BusinessAdmin - ผู้ดูแลระบบของบัญชีธุรกิจ
+type BusinessAdmin struct {
+	ID         uuid.UUID  `json:"id" gorm:"type:uuid;primary_key;default:uuid_generate_v4()"`
+	BusinessID uuid.UUID  `json:"business_id" gorm:"type:uuid;not null"`
+	UserID     uuid.UUID  `json:"user_id" gorm:"type:uuid;not null"`
+	Role       string     `json:"role" gorm:"type:varchar(20);not null"`
+	AddedAt    time.Time  `json:"added_at" gorm:"type:timestamp with time zone;default:now()"`
+	AddedBy    *uuid.UUID `json:"added_by,omitempty" gorm:"type:uuid"`
 
-		// ดึง businessID จาก URL parameter
-		businessID, err := utils.ParseUUIDParam(c, "businessId")
-		if err != nil {
-			return err
-		}
-
-		// ตรวจสอบสิทธิ์
-		hasPermission, err := businessAdminService.CheckAdminPermission(userID, businessID, []string{})
-		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"success": false,
-				"message": "Error checking permissions: " + err.Error(),
-			})
-		}
-
-		if !hasPermission {
-			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-				"success": false,
-				"message": "You don't have permission to access this business x3",
-			})
-		}
-
-		// ดึงข้อมูลบทบาทของผู้ใช้
-		admin, err := businessAdminService.GetAdminByUserAndBusinessID(userID, businessID)
-		var userRole string = "member" // ค่าเริ่มต้น
-		if err == nil && admin != nil {
-			userRole = admin.Role
-		}
-
-		// เก็บข้อมูลใน context
-		c.Locals("businessID", businessID)
-		c.Locals("businessRole", userRole)
-		c.Locals("businessUserID", userID)
-
-		return c.Next()
-	}
+	// Associations
+	Business *BusinessAccount `json:"business,omitempty" gorm:"foreignkey:BusinessID"`
+	User     *User            `json:"user,omitempty" gorm:"foreignkey:UserID"`
+	Adder    *User            `json:"adder,omitempty" gorm:"foreignkey:AddedBy"`
 }
 
-// CheckBusinessAdminWithRoles middleware ตรวจสอบบทบาทเฉพาะ
-func CheckBusinessAdminWithRoles(businessAdminService service.BusinessAdminService, allowedRoles []string) fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		// ดึง userID จาก middleware ก่อนหน้า
-		userID, err := GetUserUUID(c)
-		if err != nil {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"success": false,
-				"message": "Unauthorized: " + err.Error(),
-			})
-		}
-
-		// ดึง businessID จาก URL parameter
-		businessID, err := utils.ParseUUIDParam(c, "businessId")
-		if err != nil {
-			return err
-		}
-
-		// ตรวจสอบสิทธิ์พร้อมบทบาท
-		hasPermission, err := businessAdminService.CheckAdminPermission(userID, businessID, allowedRoles)
-		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"success": false,
-				"message": "Error checking permissions: " + err.Error(),
-			})
-		}
-
-		if !hasPermission {
-			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-				"success": false,
-				"message": "You don't have sufficient permissions for this action",
-			})
-		}
-
-		// ดึงข้อมูลบทบาทของผู้ใช้
-		admin, err := businessAdminService.GetAdminByUserAndBusinessID(userID, businessID)
-		var userRole string = "member"
-		if err == nil && admin != nil {
-			userRole = admin.Role
-		}
-
-		// เก็บข้อมูลใน context
-		c.Locals("businessID", businessID)
-		c.Locals("businessRole", userRole)
-		c.Locals("businessUserID", userID)
-
-		return c.Next()
-	}
+// TableName - ระบุชื่อตารางใน database
+func (BusinessAdmin) TableName() string {
+	return "business_admins"
 }
