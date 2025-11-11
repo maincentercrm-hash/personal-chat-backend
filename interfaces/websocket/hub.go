@@ -24,8 +24,6 @@ type Hub struct {
 	userConnectionsMux sync.RWMutex
 
 	// Business connections mapping (businessID -> clientIDs)
-	businessConnections    map[uuid.UUID][]uuid.UUID
-	businessConnectionsMux sync.RWMutex
 
 	// Conversation subscriptions (conversationID -> clientIDs)
 	conversationSubs    map[uuid.UUID][]uuid.UUID
@@ -40,7 +38,6 @@ type Hub struct {
 
 	// Core services (เฉพาะที่จำเป็น)
 	conversationService  service.ConversationService
-	businessAdminService service.BusinessAdminService
 	notificationService  service.NotificationService
 
 	// Channels
@@ -132,9 +129,6 @@ const (
 	TypeConversationLeave  MessageType = "conversation.leave"
 
 	// Business events
-	TypeBusinessBroadcast   MessageType = "business.broadcast"
-	TypeBusinessStatus      MessageType = "business.status"
-	TypeBusinessNewFollower MessageType = "business.new_follower"
 
 	// User subscribe status
 	TypeUserStatusSubscribe   MessageType = "user.status.subscribe"
@@ -192,18 +186,15 @@ type MessageHandler interface {
 // NewHub creates a new WebSocket hub
 func NewHub(
 	conversationService service.ConversationService,
-	businessAdminService service.BusinessAdminService,
 	notificationService service.NotificationService,
 ) *Hub {
 	hub := &Hub{
 		clients:              make(map[uuid.UUID]*Client),
 		userConnections:      make(map[uuid.UUID][]uuid.UUID),
-		businessConnections:  make(map[uuid.UUID][]uuid.UUID),
 		conversationSubs:     make(map[uuid.UUID][]uuid.UUID),
 		userStatusSubs:       make(map[uuid.UUID][]uuid.UUID),
 		handlers:             make(map[string]MessageHandler),
 		conversationService:  conversationService,
-		businessAdminService: businessAdminService,
 		notificationService:  notificationService,
 		register:             make(chan *Client),
 		unregister:           make(chan *Client),
@@ -218,7 +209,6 @@ func NewHub(
 	// Log services status
 	log.Printf("WebSocket Hub initialized with services:")
 	log.Printf("- ConversationService: %v", conversationService != nil)
-	log.Printf("- BusinessAdminService: %v", businessAdminService != nil)
 	log.Printf("- NotificationService: %v", notificationService != nil)
 
 	return hub
@@ -265,9 +255,6 @@ func (h *Hub) GetStats() map[string]interface{} {
 	totalUsers := len(h.userConnections)
 	h.userConnectionsMux.RUnlock()
 
-	h.businessConnectionsMux.RLock()
-	totalBusinesses := len(h.businessConnections)
-	h.businessConnectionsMux.RUnlock()
 
 	h.conversationSubsMux.RLock()
 	totalConversations := len(h.conversationSubs)
@@ -334,9 +321,6 @@ func (h *Hub) registerClient(client *Client) {
 
 	// Add to business connections if applicable
 	if client.BusinessID != nil {
-		h.businessConnectionsMux.Lock()
-		h.businessConnections[*client.BusinessID] = append(h.businessConnections[*client.BusinessID], client.ID)
-		h.businessConnectionsMux.Unlock()
 	}
 
 	// Load conversations based on connection type
@@ -473,16 +457,11 @@ func (h *Hub) unregisterClient(client *Client) {
 
 	// Remove from business connections
 	if client.BusinessID != nil {
-		h.businessConnectionsMux.Lock()
-		if connections, exists := h.businessConnections[*client.BusinessID]; exists {
 			h.removeClientFromSlice(&connections, client.ID)
 			if len(connections) == 0 {
-				delete(h.businessConnections, *client.BusinessID)
 			} else {
-				h.businessConnections[*client.BusinessID] = connections
 			}
 		}
-		h.businessConnectionsMux.Unlock()
 	}
 
 	// Remove from conversation subscriptions
@@ -574,62 +553,6 @@ func (h *Hub) loadUserConversations(client *Client) {
 		client.UserID, len(conversations), min(5, len(conversations)))
 }
 
-func (h *Hub) loadBusinessConversations(client *Client) {
-	// ตรวจสอบว่า service พร้อมใช้งานหรือไม่
-	if h.conversationService == nil {
-		log.Println("Error: ConversationService is nil in loadBusinessConversations")
-		return
-	}
-
-	if client.BusinessID == nil {
-		log.Println("Error: BusinessID is nil in loadBusinessConversations")
-		return
-	}
-
-	log.Printf("Loading business conversations for business ID: %s", client.BusinessID.String())
-
-	// ดึงข้อมูลการสนทนาของธุรกิจ
-	conversations, total, err := h.conversationService.GetBusinessConversations(
-		*client.BusinessID, client.UserID, 100, 0,
-	)
-	if err != nil {
-		log.Printf("Error loading conversations for business %s: %v", client.BusinessID.String(), err)
-		return
-	}
-
-	// Subscribe ให้กับแต่ละการสนทนา
-	h.conversationSubsMux.Lock()
-	for _, conv := range conversations {
-		h.conversationSubs[conv.ID] = append(h.conversationSubs[conv.ID], client.ID)
-	}
-	h.conversationSubsMux.Unlock()
-
-	// สร้างรายการการสนทนาเพื่อส่งให้ client
-	conversationList := make([]map[string]interface{}, len(conversations))
-	for i, conv := range conversations {
-		conversationList[i] = map[string]interface{}{
-			"id":              conv.ID,
-			"title":           conv.Title,
-			"type":            conv.Type,
-			"last_message_at": conv.LastMessageAt,
-			"unread_count":    conv.UnreadCount,
-			"is_subscribed":   i < 5,
-			"is_business":     true,
-			"business_id":     client.BusinessID,
-		}
-	}
-
-	// ส่งรายการการสนทนาให้ client
-	h.sendToClient(client, WSResponse{
-		Type:      "conversation.list",
-		Data:      conversationList,
-		Timestamp: time.Now(),
-		Success:   true,
-	})
-
-	log.Printf("Business %s loaded %d conversations out of %d total, subscribed to %d",
-		client.BusinessID.String(), len(conversations), total, min(5, len(conversations)))
-}
 
 // Helper function
 func min(a, b int) int {
