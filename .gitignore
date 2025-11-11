@@ -1,0 +1,39 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+chat-api
+main
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+*.prof
+
+# Go workspace file
+go.work
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Config files with sensitive information
+.env*
+!.env.example
+
+# Binary
+bin/
+tmp/
+
+# Upload directory
+uploads/
+
+# Logs
+logs/
+*.log

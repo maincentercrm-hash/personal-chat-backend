@@ -1,0 +1,266 @@
+// infrastructure/adapter/websocket_adapter.go
+package adapter
+
+import (
+	"github.com/google/uuid"
+	"github.com/thizplus/gofiber-chat-api/domain/port"
+	"github.com/thizplus/gofiber-chat-api/interfaces/websocket"
+	"github.com/thizplus/gofiber-chat-api/pkg/utils"
+)
+
+// WebSocketAdapter ใช้งานร่วมกับ WebSocketHub และ implements interface WebSocketPort
+type WebSocketAdapter struct {
+	hub *websocket.Hub
+}
+
+// NewWebSocketAdapter สร้าง WebSocketAdapter ตัวใหม่
+func NewWebSocketAdapter(hub *websocket.Hub) port.WebSocketPort {
+	return &WebSocketAdapter{
+		hub: hub,
+	}
+}
+
+// BroadcastToConversation ส่งข้อความไปยังสมาชิกทั้งหมดในบทสนทนา
+func (a *WebSocketAdapter) BroadcastToConversation(conversationID uuid.UUID, messageType string, data interface{}) {
+
+	a.hub.BroadcastToConversation(conversationID, websocket.MessageType(messageType), data)
+}
+
+// BroadcastToUser ส่งข้อความไปยังผู้ใช้คนใดคนหนึ่ง
+func (a *WebSocketAdapter) BroadcastToUser(userID uuid.UUID, messageType string, data interface{}) {
+	a.hub.BroadcastToUser(userID, websocket.MessageType(messageType), data)
+}
+
+// ใน websocket_adapter.go
+func (a *WebSocketAdapter) BroadcastToUsers(userIDs []uuid.UUID, messageType string, data interface{}) error {
+	a.hub.BroadcastToUsers(userIDs, websocket.MessageType(messageType), data)
+	return nil // คืนค่า nil เสมอ หรืออาจมีการตรวจสอบความผิดพลาดแล้วคืนค่า error
+}
+
+// BroadcastToBusiness ส่งข้อความไปยังธุรกิจหนึ่ง
+func (a *WebSocketAdapter) BroadcastToBusiness(businessID uuid.UUID, messageType string, data interface{}) {
+	a.hub.BroadcastToBusiness(businessID, websocket.MessageType(messageType), data)
+}
+
+// เมธอดพิเศษสำหรับส่งข้อความตามประเภท
+
+// BroadcastNewMessage ส่งการแจ้งเตือนว่ามีข้อความใหม่
+func (a *WebSocketAdapter) BroadcastNewMessage(conversationID uuid.UUID, message interface{}) {
+
+	a.BroadcastToConversation(conversationID, "message.receive", message)
+}
+
+// BroadcastMessageRead ส่งการแจ้งเตือนว่าข้อความถูกอ่าน
+func (a *WebSocketAdapter) BroadcastMessageRead(conversationID uuid.UUID, message interface{}) {
+	a.BroadcastToConversation(conversationID, "message.read", message)
+}
+
+// BroadcastMessageReadAll ส่งการแจ้งเตือนว่าข้อความทั้งหมดถูกอ่าน
+func (a *WebSocketAdapter) BroadcastMessageReadAll(conversationID uuid.UUID, message interface{}) {
+	a.BroadcastToConversation(conversationID, "message.read_all", message)
+}
+
+// BroadcastMessageEdited ส่งการแจ้งเตือนว่าข้อความถูกแก้ไข
+func (a *WebSocketAdapter) BroadcastMessageEdited(conversationID uuid.UUID, message interface{}) {
+	a.BroadcastToConversation(conversationID, "message.edit", message)
+}
+
+// BroadcastMessageReply ส่งการแจ้งเตือนว่าข้อความถูกตอบกลับ
+func (a *WebSocketAdapter) BroadcastMessageReply(conversationID uuid.UUID, message interface{}) {
+	a.BroadcastToConversation(conversationID, "message.reply", message)
+}
+
+// BroadcastMessageDeleted ส่งการแจ้งเตือนว่าข้อความถูกลบ
+func (a *WebSocketAdapter) BroadcastMessageDeleted(conversationID uuid.UUID, messageID uuid.UUID) {
+	data := map[string]interface{}{
+		"message_id": messageID,
+		"deleted_at": utils.Now(),
+	}
+	a.BroadcastToConversation(conversationID, "message.delete", data)
+}
+
+// BroadcastMessageReaction ส่งการแจ้งเตือนว่าเกิดการแสดงปฏิกิริยาในข้อความ
+func (a *WebSocketAdapter) BroadcastMessageReaction(conversationID uuid.UUID, reaction interface{}) {
+	a.BroadcastToConversation(conversationID, "message.reaction", reaction)
+}
+
+// BroadcastConversationCreated ส่งการแจ้งเตือนว่ามีการสร้างบทสนทนาใหม่
+func (a *WebSocketAdapter) BroadcastConversationCreated(userIDs []uuid.UUID, conversation interface{}) error {
+	return a.BroadcastToUsers(userIDs, "conversation.create", conversation)
+}
+
+// BroadcastConversationUpdated ส่งการแจ้งเตือนว่ามีการอัปเดตบทสนทนา
+func (a *WebSocketAdapter) BroadcastConversationUpdated(conversationID uuid.UUID, update interface{}) {
+	a.BroadcastToConversation(conversationID, "conversation.update", update)
+}
+
+// BroadcastConversationDeleted ส่งการแจ้งเตือนว่าบทสนทนาถูกลบ
+func (a *WebSocketAdapter) BroadcastConversationDeleted(conversationID uuid.UUID, memberIDs []uuid.UUID) {
+	data := map[string]interface{}{
+		"conversation_id": conversationID,
+		"deleted_at":      utils.Now(),
+	}
+	a.BroadcastToUsers(memberIDs, "conversation.deleted", data)
+}
+
+// BroadcastUserAddedToConversation ส่งการแจ้งเตือนว่ามีผู้ใช้ถูกเพิ่มในบทสนทนา
+func (a *WebSocketAdapter) BroadcastUserAddedToConversation(conversationID uuid.UUID, userID uuid.UUID) {
+	// แจ้งสมาชิกในบทสนทนา
+	data := map[string]interface{}{
+		"conversation_id": conversationID,
+		"user_id":         userID,
+		"added_at":        utils.Now(),
+	}
+	a.BroadcastToConversation(conversationID, "conversation.user_added", data)
+
+	// แจ้งผู้ใช้ที่ถูกเพิ่ม
+	userNotification := map[string]interface{}{
+		"conversation_id": conversationID,
+		"message":         "คุณถูกเพิ่มในบทสนทนา",
+	}
+	a.BroadcastToUser(userID, "conversation.create", userNotification)
+}
+
+// BroadcastUserRemovedFromConversation ส่งการแจ้งเตือนว่าผู้ใช้ถูกลบออกจากบทสนทนา
+func (a *WebSocketAdapter) BroadcastUserRemovedFromConversation(userID uuid.UUID, conversationID uuid.UUID) {
+	data := map[string]interface{}{
+		"conversation_id": conversationID,
+		"removed_at":      utils.Now(),
+	}
+	a.BroadcastToUser(userID, "conversation.user_removed", data)
+}
+
+// BroadcastNewConversation ส่งการแจ้งเตือนบทสนทนาใหม่
+func (a *WebSocketAdapter) BroadcastNewConversation(userID uuid.UUID, conversation interface{}) error {
+	a.BroadcastToUser(userID, "conversation.create", conversation)
+	return nil
+}
+
+// BroadcastBusinessBroadcast ส่งการแจ้งเตือนประกาศจากธุรกิจ
+func (a *WebSocketAdapter) BroadcastBusinessBroadcast(userIDs []uuid.UUID, broadcast interface{}) {
+	a.BroadcastToUsers(userIDs, "business.broadcast", broadcast)
+}
+
+// BroadcastBusinessNewFollower ส่งการแจ้งเตือนว่ามีผู้ติดตามธุรกิจใหม่
+func (a *WebSocketAdapter) BroadcastBusinessNewFollower(businessID uuid.UUID, followerID uuid.UUID) {
+	data := map[string]interface{}{
+		"follower_id": followerID,
+		"timestamp":   utils.Now(),
+	}
+	a.BroadcastToBusiness(businessID, "business.new_follower", data)
+}
+
+// BroadcastBusinessWelcomeMessage ส่งข้อความต้อนรับจากธุรกิจ
+func (a *WebSocketAdapter) BroadcastBusinessWelcomeMessage(userID uuid.UUID, businessID uuid.UUID, message interface{}) {
+	data := map[string]interface{}{
+		"business_id": businessID,
+		"message":     message,
+		"timestamp":   utils.Now(),
+	}
+	a.BroadcastToUser(userID, "business.welcome", data)
+}
+
+// BroadcastBusinessFollowStatusChanged ส่งการแจ้งเตือนเมื่อสถานะการติดตามธุรกิจเปลี่ยน
+func (a *WebSocketAdapter) BroadcastBusinessFollowStatusChanged(businessID uuid.UUID, userID uuid.UUID, isFollowing bool) {
+	status := "unfollowed"
+	if isFollowing {
+		status = "followed"
+	}
+
+	// แจ้งธุรกิจ
+	businessData := map[string]interface{}{
+		"user_id":      userID,
+		"business_id":  businessID,
+		"status":       status,
+		"is_following": isFollowing,
+		"timestamp":    utils.Now(),
+	}
+	a.BroadcastToBusiness(businessID, "business.follow_status_changed", businessData)
+
+	// แจ้งผู้ใช้
+	userData := map[string]interface{}{
+		"business_id":  businessID,
+		"status":       status,
+		"is_following": isFollowing,
+		"timestamp":    utils.Now(),
+	}
+	a.BroadcastToUser(userID, "user.follow_status_changed", userData)
+}
+
+// BroadcastBusinessStatusChanged ส่งการแจ้งเตือนเมื่อสถานะธุรกิจเปลี่ยน
+func (a *WebSocketAdapter) BroadcastBusinessStatusChanged(businessID uuid.UUID, status string) {
+	data := map[string]interface{}{
+		"business_id": businessID,
+		"status":      status,
+		"timestamp":   utils.Now(),
+	}
+	a.BroadcastToBusiness(businessID, "business.status", data)
+}
+
+// BroadcastFriendRequestReceived ส่งการแจ้งเตือนว่าได้รับคำขอเป็นเพื่อน
+func (a *WebSocketAdapter) BroadcastFriendRequestReceived(userID uuid.UUID, request interface{}) error {
+	a.BroadcastToUser(userID, "friend.request", request)
+	return nil
+}
+
+// BroadcastFriendRequestAccepted ส่งการแจ้งเตือนว่าคำขอเป็นเพื่อนถูกยอมรับ
+func (a *WebSocketAdapter) BroadcastFriendRequestAccepted(userID uuid.UUID, friendship interface{}) error {
+	a.BroadcastToUser(userID, "friend.accept", friendship)
+	return nil
+}
+
+// BroadcastFriendRemoved ส่งการแจ้งเตือนว่าเพื่อนถูกลบ
+func (a *WebSocketAdapter) BroadcastFriendRemoved(userID uuid.UUID, friendID uuid.UUID) {
+	data := map[string]interface{}{
+		"friend_id":  friendID,
+		"removed_by": userID,
+		"timestamp":  utils.Now(),
+	}
+	// แจ้งทั้งสองฝ่าย
+	a.BroadcastToUsers([]uuid.UUID{userID, friendID}, "friend.remove", data)
+}
+
+// BroadcastUserBlocked ส่งการแจ้งเตือนว่าผู้ใช้ถูกบล็อก
+func (a *WebSocketAdapter) BroadcastUserBlocked(blockerID uuid.UUID, blockedID uuid.UUID) {
+	data := map[string]interface{}{
+		"blocker_id": blockerID,
+		"blocked_at": utils.Now(),
+	}
+	a.BroadcastToUser(blockedID, "user.blocked", data)
+}
+
+// BroadcastUserUnblocked ส่งการแจ้งเตือนว่าผู้ใช้ถูกปลดบล็อก
+func (a *WebSocketAdapter) BroadcastUserUnblocked(unblockerID uuid.UUID, unblockedID uuid.UUID) {
+	data := map[string]interface{}{
+		"unblocker_id": unblockerID,
+		"unblocked_at": utils.Now(),
+	}
+	a.BroadcastToUser(unblockedID, "user.unblocked", data)
+}
+
+// BroadcastNotification ส่งการแจ้งเตือนทั่วไป
+func (a *WebSocketAdapter) BroadcastNotification(userIDs []uuid.UUID, notification interface{}) {
+	a.BroadcastToUsers(userIDs, "notification", notification)
+}
+
+// BroadcastAlert ส่งการแจ้งเตือนแบบเร่งด่วน
+func (a *WebSocketAdapter) BroadcastAlert(userID uuid.UUID, alert interface{}) {
+	a.BroadcastToUser(userID, "alert", alert)
+}
+
+// BroadcastSystemMessage ส่งข้อความจากระบบ
+func (a *WebSocketAdapter) BroadcastSystemMessage(userIDs []uuid.UUID, message interface{}) {
+	a.BroadcastToUsers(userIDs, "system.message", message)
+}
+
+// =========== Customer Profile Notifications ===========
+
+// BroadcastProfileUpdate ส่งการแจ้งเตือนการอัพเดทโปรไฟล์ลูกค้า
+func (a *WebSocketAdapter) BroadcastProfileUpdate(businessID uuid.UUID, userID uuid.UUID, profile interface{}) {
+	a.BroadcastToBusiness(businessID, "profile.update", profile)
+}
+
+func (a *WebSocketAdapter) BroadcastProfileUpdateTags(businessID uuid.UUID, userID uuid.UUID, payload interface{}) {
+	// ส่งข้อมูลไปยังทุกคนในธุรกิจ
+	a.BroadcastToBusiness(businessID, "profile.tag_update", payload)
+}

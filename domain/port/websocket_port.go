@@ -1,0 +1,49 @@
+// domain/port/websocket_port.go
+package port
+
+import "github.com/google/uuid"
+
+// WebSocketPort เป็น interface สำหรับส่งข้อมูลผ่าน WebSocket
+type WebSocketPort interface {
+	// Message notifications
+	BroadcastNewMessage(conversationID uuid.UUID, message interface{})
+	BroadcastMessageRead(conversationID uuid.UUID, message interface{})
+	BroadcastMessageReadAll(conversationID uuid.UUID, message interface{})
+	BroadcastMessageEdited(conversationID uuid.UUID, message interface{})
+	BroadcastMessageReply(conversationID uuid.UUID, message interface{})
+	BroadcastMessageDeleted(conversationID uuid.UUID, messageID uuid.UUID)
+	BroadcastMessageReaction(conversationID uuid.UUID, reaction interface{})
+
+	// Conversation notifications
+	BroadcastConversationCreated(userIDs []uuid.UUID, conversation interface{}) error
+	BroadcastConversationUpdated(conversationID uuid.UUID, update interface{})
+	BroadcastConversationDeleted(conversationID uuid.UUID, memberIDs []uuid.UUID)
+	BroadcastUserAddedToConversation(conversationID uuid.UUID, userID uuid.UUID)
+	BroadcastUserRemovedFromConversation(userID, conversationID uuid.UUID)
+	BroadcastNewConversation(userID uuid.UUID, conversation interface{}) error
+
+	// Business notifications
+	BroadcastBusinessBroadcast(userIDs []uuid.UUID, broadcast interface{})
+	BroadcastBusinessNewFollower(businessID, followerID uuid.UUID)
+	BroadcastBusinessWelcomeMessage(userID, businessID uuid.UUID, message interface{})
+	BroadcastBusinessFollowStatusChanged(businessID, userID uuid.UUID, isFollowing bool)
+	BroadcastBusinessStatusChanged(businessID uuid.UUID, status string)
+
+	// Customer Profile notifications
+	BroadcastProfileUpdate(businessID, userID uuid.UUID, profile interface{})
+	BroadcastProfileUpdateTags(businessID uuid.UUID, userID uuid.UUID, payload interface{})
+
+	// Friend notifications
+	BroadcastFriendRequestReceived(userID uuid.UUID, request interface{}) error
+	BroadcastFriendRequestAccepted(userID uuid.UUID, friendship interface{}) error
+	BroadcastFriendRemoved(userID, friendID uuid.UUID)
+
+	// User notifications
+	BroadcastUserBlocked(blockerID, blockedID uuid.UUID)
+	BroadcastUserUnblocked(unblockerID, unblockedID uuid.UUID)
+
+	// General notifications
+	BroadcastNotification(userIDs []uuid.UUID, notification interface{})
+	BroadcastAlert(userID uuid.UUID, alert interface{})
+	BroadcastSystemMessage(userIDs []uuid.UUID, message interface{})
+}
