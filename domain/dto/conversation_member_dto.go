@@ -13,6 +13,11 @@ type AddMemberRequest struct {
 	UserID string `json:"user_id" validate:"required,uuid"`
 }
 
+// BulkAddMembersRequest สำหรับการเพิ่มสมาชิกหลายคนพร้อมกัน
+type BulkAddMembersRequest struct {
+	UserIDs []string `json:"user_ids" validate:"required,min=1,max=50,dive,uuid"`
+}
+
 // ToggleAdminRequest สำหรับการเปลี่ยนสถานะแอดมินของสมาชิก
 type ToggleAdminRequest struct {
 	IsAdmin bool `json:"is_admin"`
@@ -82,4 +87,18 @@ type MemberListResponse struct {
 type AdminStatusResponse struct {
 	GenericResponse
 	IsAdmin bool `json:"is_admin"`
+}
+
+// BulkAddMembersResponse สำหรับผลลัพธ์การเพิ่มสมาชิกหลายคน
+type BulkAddMembersResponse struct {
+	GenericResponse
+	Data struct {
+		AddedMembers  []MemberDTO `json:"added_members"`
+		FailedMembers []struct {
+			UserID string `json:"user_id"`
+			Reason string `json:"reason"`
+		} `json:"failed_members,omitempty"`
+		TotalAdded  int `json:"total_added"`
+		TotalFailed int `json:"total_failed"`
+	} `json:"data"`
 }

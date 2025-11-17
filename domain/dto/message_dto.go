@@ -11,12 +11,14 @@ import (
 
 // TextMessageRequest สำหรับการส่งข้อความประเภทข้อความ
 type TextMessageRequest struct {
+	TempID   string      `json:"temp_id,omitempty"`
 	Content  string      `json:"content" validate:"required"`
 	Metadata types.JSONB `json:"metadata,omitempty"`
 }
 
 // StickerMessageRequest สำหรับการส่งข้อความประเภทสติกเกอร์
 type StickerMessageRequest struct {
+	TempID            string      `json:"temp_id,omitempty"`
 	StickerID         uuid.UUID   `json:"sticker_id" validate:"required"`
 	StickerSetID      uuid.UUID   `json:"sticker_set_id" validate:"required"`
 	MediaURL          string      `json:"media_url" validate:"required"`
@@ -26,6 +28,7 @@ type StickerMessageRequest struct {
 
 // ImageMessageRequest สำหรับการส่งข้อความประเภทรูปภาพ
 type ImageMessageRequest struct {
+	TempID            string      `json:"temp_id,omitempty"`
 	MediaURL          string      `json:"media_url" validate:"required"`
 	MediaThumbnailURL string      `json:"media_thumbnail_url,omitempty"`
 	Caption           string      `json:"caption,omitempty"`
@@ -34,6 +37,7 @@ type ImageMessageRequest struct {
 
 // FileMessageRequest สำหรับการส่งข้อความประเภทไฟล์
 type FileMessageRequest struct {
+	TempID   string      `json:"temp_id,omitempty"`
 	MediaURL string      `json:"media_url" validate:"required"`
 	FileName string      `json:"file_name" validate:"required"`
 	FileSize int64       `json:"file_size" validate:"required"`
@@ -96,6 +100,7 @@ type BusinessFileMessageRequest struct {
 // MessageDTO ข้อมูลข้อความ
 type MessageDTO struct {
 	ID                uuid.UUID  `json:"id"`
+	TempID            string     `json:"temp_id,omitempty"` // Temporary ID from frontend
 	ConversationID    uuid.UUID  `json:"conversation_id"`
 	SenderID          *uuid.UUID `json:"sender_id"`
 	SenderType        string     `json:"sender_type"` // user, business, system
@@ -130,6 +135,7 @@ type MessageDTO struct {
 	// ข้อมูลการอ่าน
 	IsRead         bool        `json:"is_read"`
 	ReadCount      int         `json:"read_count"`
+	Status         string      `json:"status"` // sent, delivered, read, failed
 	ReadByIDs      []uuid.UUID `json:"read_by_ids,omitempty"`
 	DeliveredToIDs []uuid.UUID `json:"delivered_to_ids,omitempty"`
 

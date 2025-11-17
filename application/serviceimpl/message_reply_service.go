@@ -59,55 +59,6 @@ func (s *messageService) ReplyToMessage(replyToID, userID uuid.UUID, messageType
 	senderType := "user"
 
 	// ตรวจสอบว่ามี business_id ใน metadata หรือไม่
-	if bizIDValue, hasBizID := metadata["business_id"]; hasBizID && bizIDValue != nil {
-		// แปลง business_id เป็น string
-		bizIDStr, ok := bizIDValue.(string)
-		if ok {
-			// ตรวจสอบว่าการสนทนานี้เป็นประเภท business หรือไม่
-			conversation, err := s.conversationRepo.GetByID(replyToMessage.ConversationID)
-			if err == nil && conversation != nil && conversation.Type == "business" && conversation.BusinessID != nil {
-				bizIDFromStr := bizIDStr
-				bizIDFromConv := conversation.BusinessID.String()
-
-				// ถ้า business_id ตรงกับในการสนทนา ให้ส่งในนามธุรกิจ
-				if bizIDFromStr == bizIDFromConv {
-					senderType = "business"
-
-					// เพิ่ม metadata สำหรับการส่งในนามธุรกิจ
-					// ดึงข้อมูลผู้ใช้
-					user, err := s.userRepo.FindByID(userID)
-					if err == nil && user != nil {
-						// สร้าง metadata ใหม่ถ้ายังไม่มี
-						if metadata == nil {
-							metadata = make(map[string]interface{})
-						}
-
-						metadata["admin_id"] = userID.String()
-
-						// เพิ่มชื่อผู้ใช้
-						if user.DisplayName != "" {
-							metadata["admin_display_name"] = user.DisplayName
-						} else {
-							metadata["admin_display_name"] = user.Username
-						}
-
-						// ตรวจสอบว่าเป็นเจ้าของธุรกิจหรือไม่
-						bizID, _ := uuid.Parse(bizIDStr)
-						business, err := s.businessAccountRepo.GetByID(bizID)
-						if err == nil && business != nil && business.OwnerID != nil {
-							if *business.OwnerID == userID {
-								metadata["admin_role"] = "owner"
-							} else {
-								metadata["admin_role"] = "user"
-							}
-						} else {
-							metadata["admin_role"] = "user"
-						}
-					}
-				}
-			}
-		}
-	}
 
 	// สร้างข้อความใหม่
 	now := time.Now()
@@ -126,11 +77,6 @@ func (s *messageService) ReplyToMessage(replyToID, userID uuid.UUID, messageType
 		UpdatedAt:         now,
 	}
 
-	// ตรวจสอบประเภทของการสนทนาและเพิ่ม business_id ถ้าจำเป็น
-	conversation, err := s.conversationRepo.GetByID(replyToMessage.ConversationID)
-	if err == nil && conversation != nil && conversation.Type == "business" && conversation.BusinessID != nil {
-		message.BusinessID = conversation.BusinessID
-	}
 
 	// บันทึกข้อความ
 	if err := s.messageRepo.Create(message); err != nil {

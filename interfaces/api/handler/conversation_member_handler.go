@@ -10,13 +10,18 @@ import (
 
 // ConversationMemberHandler จัดการคำขอสำหรับการจัดการสมาชิกในการสนทนา
 type ConversationMemberHandler struct {
-	memberService service.ConversationMemberService
+	memberService       service.ConversationMemberService
+	notificationService service.NotificationService
 }
 
 // NewConversationMemberHandler สร้าง handler ใหม่
-func NewConversationMemberHandler(memberService service.ConversationMemberService) *ConversationMemberHandler {
+func NewConversationMemberHandler(
+	memberService service.ConversationMemberService,
+	notificationService service.NotificationService,
+) *ConversationMemberHandler {
 	return &ConversationMemberHandler{
-		memberService: memberService,
+		memberService:       memberService,
+		notificationService: notificationService,
 	}
 }
 
@@ -95,11 +100,124 @@ func (h *ConversationMemberHandler) AddConversationMember(c *fiber.Ctx) error {
 		})
 	}
 
+	// ส่ง WebSocket notification แจ้งว่ามีสมาชิกใหม่ถูกเพิ่มเข้ากลุ่ม
+	h.notificationService.NotifyUserAddedToConversation(conversationID, newMemberID)
+
 	// 6. ส่งผลลัพธ์กลับ
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"success": true,
 		"message": "Member added successfully",
 		"data":    memberDTO,
+	})
+}
+
+// BulkAddConversationMembers เพิ่มสมาชิกหลายคนในการสนทนา
+func (h *ConversationMemberHandler) BulkAddConversationMembers(c *fiber.Ctx) error {
+	// 1. ดึงข้อมูลผู้ใช้จาก context
+	userID, err := uuid.Parse(c.Locals("userID").(string))
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"success": false,
+			"message": "Unauthorized: " + err.Error(),
+		})
+	}
+
+	// 2. ดึง conversation ID จาก parameter
+	conversationIDStr := c.Params("conversationId")
+	if conversationIDStr == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"message": "Conversation ID is required",
+		})
+	}
+
+	conversationID, err := uuid.Parse(conversationIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"message": "Invalid conversation ID",
+		})
+	}
+
+	// 3. รับข้อมูลผู้ใช้ที่ต้องการเพิ่ม
+	var input dto.BulkAddMembersRequest
+	if err := c.BodyParser(&input); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"message": "Invalid request data: " + err.Error(),
+		})
+	}
+
+	// 4. ตรวจสอบ user IDs
+	if len(input.UserIDs) == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"message": "At least one user ID is required",
+		})
+	}
+
+	// แปลง string IDs เป็น UUID
+	var memberIDs []uuid.UUID
+	for _, userIDStr := range input.UserIDs {
+		memberID, err := uuid.Parse(userIDStr)
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"success": false,
+				"message": "Invalid user ID format: " + userIDStr,
+			})
+		}
+		memberIDs = append(memberIDs, memberID)
+	}
+
+	// 5. เรียกใช้ service
+	addedMembers, failedMembers, err := h.memberService.BulkAddMembers(userID, conversationID, memberIDs)
+	if err != nil {
+		// จัดการรหัสสถานะตามข้อผิดพลาด
+		statusCode := fiber.StatusInternalServerError
+		switch err.Error() {
+		case "only admins can add members", "you are not a member of this conversation":
+			statusCode = fiber.StatusForbidden
+		case "cannot add members to direct conversation":
+			statusCode = fiber.StatusBadRequest
+		}
+
+		return c.Status(statusCode).JSON(fiber.Map{
+			"success": false,
+			"message": err.Error(),
+		})
+	}
+
+	// 6. สร้าง response
+	failedResponse := []fiber.Map{}
+	for _, failed := range failedMembers {
+		failedResponse = append(failedResponse, fiber.Map{
+			"user_id": failed.UserID.String(),
+			"reason":  failed.Reason,
+		})
+	}
+
+	message := "Members added successfully"
+	if len(addedMembers) == 0 {
+		message = "No members were added"
+	} else if len(failedMembers) > 0 {
+		message = "Some members were added successfully, some failed"
+	}
+
+	// ส่ง WebSocket notification สำหรับแต่ละคนที่ถูกเพิ่มสำเร็จ
+	for _, member := range addedMembers {
+		memberUUID, _ := uuid.Parse(member.UserID)
+		h.notificationService.NotifyUserAddedToConversation(conversationID, memberUUID)
+	}
+
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+		"success": true,
+		"message": message,
+		"data": fiber.Map{
+			"added_members":  addedMembers,
+			"failed_members": failedResponse,
+			"total_added":    len(addedMembers),
+			"total_failed":   len(failedMembers),
+		},
 	})
 }
 
@@ -228,6 +346,9 @@ func (h *ConversationMemberHandler) RemoveConversationMember(c *fiber.Ctx) error
 			"message": err.Error(),
 		})
 	}
+
+	// ส่ง WebSocket notification แจ้งว่าสมาชิกถูกลบออกจากกลุ่ม
+	h.notificationService.NotifyUserRemovedFromConversation(targetUserID, conversationID)
 
 	// 5. ส่งผลลัพธ์กลับ
 	return c.JSON(fiber.Map{

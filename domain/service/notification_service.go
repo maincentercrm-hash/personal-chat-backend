@@ -24,20 +24,13 @@ type NotificationService interface {
 	NotifyUserRemovedFromConversation(userID, conversationID uuid.UUID)
 	NotifyNewConversation(conversation interface{}) error
 
-	// Business notifications
-	NotifyBusinessBroadcast(userIDs []uuid.UUID, broadcast interface{})
-	NotifyBusinessNewFollower(businessID, followerID uuid.UUID)
-	NotifyBusinessWelcomeMessage(userID, businessID uuid.UUID, message interface{})
-	NotifyBusinessFollowStatusChanged(businessID, userID uuid.UUID, isFollowing bool)
-	NotifyBusinessStatusChanged(businessID uuid.UUID, status string)
 
 	// Customer Profile notifications
-	NotifyProfileUpdate(businessID, userID uuid.UUID, profile interface{})
-	NotifyProfileUpdateTags(businessID, userID uuid.UUID, tagId uuid.UUID, action string)
 
 	// Friend notifications
 	NotifyFriendRequestReceived(request interface{}) error
 	NotifyFriendRequestAccepted(friendship interface{}) error
+	NotifyFriendRequestRejected(friendship interface{}) error
 	NotifyFriendRemoved(userID, friendID uuid.UUID)
 
 	// User notifications

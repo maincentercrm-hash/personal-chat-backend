@@ -29,7 +29,6 @@ type User struct {
 	CreatedConversations []*Conversation        `json:"created_conversations,omitempty" gorm:"foreignkey:CreatorID"`
 	Messages             []*Message             `json:"messages,omitempty" gorm:"foreignkey:SenderID"`
 	MessageReads         []*MessageRead         `json:"message_reads,omitempty" gorm:"foreignkey:UserID"`
-	Events               []*UserEvent           `json:"events,omitempty" gorm:"foreignkey:UserID"`
 	FavoriteStickers     []*UserFavoriteSticker `json:"favorite_stickers,omitempty" gorm:"foreignkey:UserID"`
 	FriendshipsAsUser    []*UserFriendship      `json:"friendships_as_user,omitempty" gorm:"foreignkey:UserID"`
 	FriendshipsAsFriend  []*UserFriendship      `json:"friendships_as_friend,omitempty" gorm:"foreignkey:FriendID"`

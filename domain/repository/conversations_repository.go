@@ -52,6 +52,12 @@ type ConversationRepository interface {
 	// SetMuteStatus กำหนดสถานะการปิดเสียงของการสนทนา
 	SetMuteStatus(conversationID, userID uuid.UUID, isMuted bool) error
 
+	// SetHiddenStatus กำหนดสถานะการซ่อนการสนทนา
+	SetHiddenStatus(conversationID, userID uuid.UUID, isHidden bool) error
+
+	// IsHidden ตรวจสอบว่าการสนทนาถูกซ่อนหรือไม่
+	IsHidden(conversationID, userID uuid.UUID) (bool, error)
+
 	// MarkAllMessagesAsRead มาร์คข้อความทั้งหมดในการสนทนาว่าอ่านแล้ว
 	MarkAllMessagesAsRead(conversationID, userID uuid.UUID) error
 
@@ -87,27 +93,5 @@ type ConversationRepository interface {
 	// GetConversationsAfterID ดึงการสนทนาที่ใหม่กว่า ID ที่ระบุ
 	GetConversationsAfterID(userID, afterID uuid.UUID, limit int, convType string, pinned bool) ([]*models.Conversation, int, error)
 
-	/** ################### FOR BUSINESS ONLY [WELCOME MESSAGE]################ */
-	// FindBusinessUserConversation หาการสนทนาระหว่างธุรกิจและผู้ใช้
-	FindBusinessUserConversation(businessID, userID uuid.UUID) (uuid.UUID, error)
 
-	/** ################### FOR BUSINESS ONLY ################## */
-
-	// GetBusinessConversations ดึงการสนทนาทั้งหมดของธุรกิจ
-	GetBusinessConversations(businessID uuid.UUID, limit, offset int) ([]*models.Conversation, int, error)
-
-	// GetBusinessConversationsBeforeTime ดึงการสนทนาธุรกิจที่เก่ากว่าเวลา
-	GetBusinessConversationsBeforeTime(businessID uuid.UUID, beforeTime time.Time, limit int) ([]*models.Conversation, int, error)
-
-	// GetBusinessConversationsAfterTime ดึงการสนทนาธุรกิจที่ใหม่กว่าเวลา
-	GetBusinessConversationsAfterTime(businessID uuid.UUID, afterTime time.Time, limit int) ([]*models.Conversation, int, error)
-
-	// GetBusinessConversationsBeforeID ดึงการสนทนาธุรกิจที่เก่ากว่า ID
-	GetBusinessConversationsBeforeID(businessID, beforeID uuid.UUID, limit int) ([]*models.Conversation, int, error)
-
-	// GetBusinessConversationsAfterID ดึงการสนทนาธุรกิจที่ใหม่กว่า ID
-	GetBusinessConversationsAfterID(businessID, afterID uuid.UUID, limit int) ([]*models.Conversation, int, error)
-
-	// CheckConversationBelongsToBusiness ตรวจสอบว่าการสนทนาเป็นของธุรกิจ
-	CheckConversationBelongsToBusiness(conversationID, businessID uuid.UUID) (bool, error)
 }

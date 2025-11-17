@@ -3,6 +3,7 @@ package serviceimpl
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -104,6 +105,120 @@ func (s *conversationMemberService) AddMember(userID, conversationID, newMemberI
 	}
 
 	return memberDTO, nil
+}
+
+// BulkAddMembers เพิ่มสมาชิกหลายคนพร้อมกันในการสนทนากลุ่ม
+func (s *conversationMemberService) BulkAddMembers(userID, conversationID uuid.UUID, newMemberIDs []uuid.UUID) (addedMembers []*dto.MemberDTO, failed []struct {
+	UserID uuid.UUID
+	Reason string
+}, err error) {
+	// 1. ตรวจสอบว่าผู้ใช้เป็นสมาชิกและเป็นแอดมินหรือไม่
+	member, err := s.conversationRepo.GetMember(conversationID, userID)
+	if err != nil {
+		return nil, nil, errors.New("error checking membership: " + err.Error())
+	}
+	if member == nil {
+		return nil, nil, errors.New("you are not a member of this conversation")
+	}
+	if !member.IsAdmin {
+		return nil, nil, errors.New("only admins can add members")
+	}
+
+	// 2. ตรวจสอบประเภทการสนทนาว่าเป็นกลุ่มหรือไม่
+	conversation, err := s.conversationRepo.GetByID(conversationID)
+	if err != nil {
+		return nil, nil, errors.New("error fetching conversation: " + err.Error())
+	}
+	if conversation.Type == "direct" {
+		return nil, nil, errors.New("cannot add members to direct conversation")
+	}
+
+	// 3. เพิ่มสมาชิกทีละคน
+	addedMembers = []*dto.MemberDTO{}
+	failed = []struct {
+		UserID uuid.UUID
+		Reason string
+	}{}
+
+	now := time.Now()
+	adderName, _ := s.getUserName(userID)
+	addedNames := []string{}
+
+	for _, newMemberID := range newMemberIDs {
+		// ตรวจสอบว่าผู้ใช้ที่จะเพิ่มมีอยู่จริงหรือไม่
+		user, err := s.userRepo.FindByID(newMemberID)
+		if err != nil || user == nil {
+			failed = append(failed, struct {
+				UserID uuid.UUID
+				Reason string
+			}{UserID: newMemberID, Reason: "user not found"})
+			continue
+		}
+
+		// ตรวจสอบว่าผู้ใช้เป็นสมาชิกอยู่แล้วหรือไม่
+		isMember, err := s.conversationRepo.IsMember(conversationID, newMemberID)
+		if err != nil {
+			failed = append(failed, struct {
+				UserID uuid.UUID
+				Reason string
+			}{UserID: newMemberID, Reason: "error checking membership"})
+			continue
+		}
+		if isMember {
+			failed = append(failed, struct {
+				UserID uuid.UUID
+				Reason string
+			}{UserID: newMemberID, Reason: "already a member"})
+			continue
+		}
+
+		// เพิ่มสมาชิกใหม่
+		newMember := &models.ConversationMember{
+			ID:             uuid.New(),
+			ConversationID: conversationID,
+			UserID:         newMemberID,
+			IsAdmin:        false,
+			JoinedAt:       now,
+		}
+
+		if err := s.conversationRepo.AddMember(newMember); err != nil {
+			failed = append(failed, struct {
+				UserID uuid.UUID
+				Reason string
+			}{UserID: newMemberID, Reason: "error adding to database"})
+			continue
+		}
+
+		// สร้าง DTO
+		memberDTO := &dto.MemberDTO{
+			ID:             newMember.ID.String(),
+			UserID:         newMember.UserID.String(),
+			Username:       user.Username,
+			DisplayName:    user.DisplayName,
+			ProfilePicture: user.ProfileImageURL,
+			Role:           "member",
+			JoinedAt:       newMember.JoinedAt,
+			IsOnline:       false,
+		}
+
+		addedMembers = append(addedMembers, memberDTO)
+		addedNames = append(addedNames, user.DisplayName)
+	}
+
+	// 4. สร้างข้อความระบบถ้ามีคนถูกเพิ่มสำเร็จ
+	if len(addedMembers) > 0 {
+		var systemMessage string
+		if len(addedMembers) == 1 {
+			systemMessage = adderName + " added " + addedNames[0] + " to the group"
+		} else {
+			systemMessage = adderName + " added " + fmt.Sprintf("%d members", len(addedMembers)) + " to the group"
+		}
+
+		s.createSystemMessage(conversationID, systemMessage)
+		s.conversationRepo.UpdateLastMessage(conversationID, systemMessage, now)
+	}
+
+	return addedMembers, failed, nil
 }
 
 // GetMembers ดึงรายการสมาชิกในการสนทนา

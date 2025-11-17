@@ -209,6 +209,12 @@ func (a *WebSocketAdapter) BroadcastFriendRequestAccepted(userID uuid.UUID, frie
 	return nil
 }
 
+// BroadcastFriendRequestRejected ส่งการแจ้งเตือนว่าคำขอเป็นเพื่อนถูกปฏิเสธ
+func (a *WebSocketAdapter) BroadcastFriendRequestRejected(userID uuid.UUID, friendship interface{}) error {
+	a.BroadcastToUser(userID, "friend.reject", friendship)
+	return nil
+}
+
 // BroadcastFriendRemoved ส่งการแจ้งเตือนว่าเพื่อนถูกลบ
 func (a *WebSocketAdapter) BroadcastFriendRemoved(userID uuid.UUID, friendID uuid.UUID) {
 	data := map[string]interface{}{

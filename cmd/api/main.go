@@ -74,16 +74,6 @@ func main() {
 	go container.WebSocketHub.Run(ctx)
 	log.Println("WebSocket Hub started successfully")
 
-	// โหลด scheduled broadcasts และเริ่ม scheduler
-	err = container.BroadcastScheduler.LoadScheduledBroadcasts()
-	if err != nil {
-		log.Printf("Warning: Error loading scheduled broadcasts: %v", err)
-	}
-
-	err = container.BroadcastScheduler.Start()
-	if err != nil {
-		log.Printf("Warning: Error starting broadcast scheduler: %v", err)
-	}
 
 	// ตั้งค่าและสร้าง Fiber App
 	app := app.SetupApp(container)
@@ -120,10 +110,6 @@ func main() {
 	// ยังคงให้ cancel เพื่อแจ้ง goroutines อื่นๆ ที่อาจใช้ context นี้
 	cancel()
 
-	// หยุด scheduler ก่อนปิดแอป
-	if err := container.BroadcastScheduler.Stop(); err != nil {
-		log.Printf("Error stopping scheduler: %v", err)
-	}
 
 	if err := app.Shutdown(); err != nil {
 		log.Fatalf("ผิดพลาดในการปิดเซิร์ฟเวอร์: %v", err)

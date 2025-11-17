@@ -48,6 +48,7 @@ func (h *MessageHandler) SendTextMessage(c *fiber.Ctx) error {
 
 	// รับข้อมูลข้อความจาก request body
 	var input struct {
+		TempID   string      `json:"temp_id"`
 		Content  string      `json:"content"`
 		Metadata types.JSONB `json:"metadata"`
 	}
@@ -59,8 +60,17 @@ func (h *MessageHandler) SendTextMessage(c *fiber.Ctx) error {
 		})
 	}
 
+	// บันทึก temp_id ลงใน metadata ถ้ามี (JSONB เป็น map[string]interface{} อยู่แล้ว)
+	metadata := input.Metadata
+	if input.TempID != "" {
+		if metadata == nil {
+			metadata = make(types.JSONB)
+		}
+		metadata["tempId"] = input.TempID
+	}
+
 	// เรียกใช้ service
-	message, err := h.messageService.SendTextMessage(conversationID, userID, input.Content, input.Metadata)
+	message, err := h.messageService.SendTextMessage(conversationID, userID, input.Content, metadata)
 	if err != nil {
 		statusCode := fiber.StatusInternalServerError
 		// ตรวจสอบประเภทข้อผิดพลาดเพื่อกำหนด status code ที่เหมาะสม
@@ -110,6 +120,7 @@ func (h *MessageHandler) SendStickerMessage(c *fiber.Ctx) error {
 
 	// รับข้อมูลสติกเกอร์จาก request body
 	var input struct {
+		TempID            string      `json:"temp_id"`
 		StickerID         uuid.UUID   `json:"sticker_id"`
 		StickerSetID      uuid.UUID   `json:"sticker_set_id"`
 		MediaURL          string      `json:"media_url"`
@@ -124,6 +135,15 @@ func (h *MessageHandler) SendStickerMessage(c *fiber.Ctx) error {
 		})
 	}
 
+	// บันทึก temp_id ลงใน metadata ถ้ามี (JSONB เป็น map[string]interface{} อยู่แล้ว)
+	metadata := input.Metadata
+	if input.TempID != "" {
+		if metadata == nil {
+			metadata = make(types.JSONB)
+		}
+		metadata["tempId"] = input.TempID
+	}
+
 	// เรียกใช้ service
 	message, err := h.messageService.SendStickerMessage(
 		conversationID,
@@ -132,7 +152,7 @@ func (h *MessageHandler) SendStickerMessage(c *fiber.Ctx) error {
 		input.StickerSetID,
 		input.MediaURL,
 		input.MediaThumbnailURL,
-		input.Metadata,
+		metadata,
 	)
 
 	if err != nil {
@@ -177,6 +197,7 @@ func (h *MessageHandler) SendImageMessage(c *fiber.Ctx) error {
 
 	// รับข้อมูลรูปภาพจาก request body
 	var input struct {
+		TempID            string      `json:"temp_id"`
 		MediaURL          string      `json:"media_url"`
 		MediaThumbnailURL string      `json:"media_thumbnail_url"`
 		Caption           string      `json:"caption"`
@@ -190,6 +211,15 @@ func (h *MessageHandler) SendImageMessage(c *fiber.Ctx) error {
 		})
 	}
 
+	// บันทึก temp_id ลงใน metadata ถ้ามี (JSONB เป็น map[string]interface{} อยู่แล้ว)
+	metadata := input.Metadata
+	if input.TempID != "" {
+		if metadata == nil {
+			metadata = make(types.JSONB)
+		}
+		metadata["tempId"] = input.TempID
+	}
+
 	// เรียกใช้ service
 	message, err := h.messageService.SendImageMessage(
 		conversationID,
@@ -197,7 +227,7 @@ func (h *MessageHandler) SendImageMessage(c *fiber.Ctx) error {
 		input.MediaURL,
 		input.MediaThumbnailURL,
 		input.Caption,
-		input.Metadata,
+		metadata,
 	)
 
 	if err != nil {
@@ -242,6 +272,7 @@ func (h *MessageHandler) SendFileMessage(c *fiber.Ctx) error {
 
 	// รับข้อมูลไฟล์จาก request body
 	var input struct {
+		TempID   string      `json:"temp_id"`
 		MediaURL string      `json:"media_url"`
 		FileName string      `json:"file_name"`
 		FileSize int64       `json:"file_size"`
@@ -256,6 +287,15 @@ func (h *MessageHandler) SendFileMessage(c *fiber.Ctx) error {
 		})
 	}
 
+	// บันทึก temp_id ลงใน metadata ถ้ามี (JSONB เป็น map[string]interface{} อยู่แล้ว)
+	metadata := input.Metadata
+	if input.TempID != "" {
+		if metadata == nil {
+			metadata = make(types.JSONB)
+		}
+		metadata["tempId"] = input.TempID
+	}
+
 	// เรียกใช้ service
 	message, err := h.messageService.SendFileMessage(
 		conversationID,
@@ -264,7 +304,7 @@ func (h *MessageHandler) SendFileMessage(c *fiber.Ctx) error {
 		input.FileName,
 		input.FileSize,
 		input.FileType,
-		input.Metadata,
+		metadata,
 	)
 
 	if err != nil {
@@ -540,302 +580,3 @@ func (h *MessageHandler) ReplyToMessage(c *fiber.Ctx) error {
 	})
 }
 
-// SendBusinessTextMessage จัดการคำขอส่งข้อความในนามธุรกิจ
-func (h *MessageHandler) SendBusinessTextMessage(c *fiber.Ctx) error {
-	// ดึง User ID จาก context
-	userID, err := middleware.GetUserUUID(c)
-	if err != nil {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"success": false,
-			"message": "Unauthorized: " + err.Error(),
-		})
-	}
-
-	businessID, err := utils.ParseUUIDParam(c, "businessId")
-	if err != nil {
-		return err // error response ถูกจัดการในฟังก์ชันแล้ว
-	}
-
-	conversationID, err := utils.ParseUUIDParam(c, "conversationId")
-	if err != nil {
-		return err // error response ถูกจัดการในฟังก์ชันแล้ว
-	}
-
-	// รับข้อมูลข้อความจาก request body
-	var input struct {
-		Content   string      `json:"content"`
-		Metadata  types.JSONB `json:"metadata"`
-		ReplyToID *uuid.UUID  `json:"reply_to_id"`
-	}
-
-	if err := c.BodyParser(&input); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"success": false,
-			"message": "Invalid request body: " + err.Error(),
-		})
-	}
-
-	// เรียกใช้ service
-	message, err := h.messageService.SendBusinessTextMessage(
-		businessID,
-		conversationID,
-		userID,
-		input.Content,
-		input.Metadata,
-		input.ReplyToID,
-	)
-
-	if err != nil {
-		statusCode := fiber.StatusInternalServerError
-		// ตรวจสอบประเภทข้อผิดพลาด
-		if err.Error() == "user is not an admin of this business" {
-			statusCode = fiber.StatusForbidden
-		} else if err.Error() == "this conversation does not belong to your business" {
-			statusCode = fiber.StatusForbidden
-		} else if err.Error() == "message content cannot be empty" {
-			statusCode = fiber.StatusBadRequest
-		}
-
-		return c.Status(statusCode).JSON(fiber.Map{
-			"success": false,
-			"message": err.Error(),
-		})
-	}
-
-	h.notificationService.NotifyNewMessage(conversationID, message)
-
-	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
-		"success": true,
-		"message": "Business text message sent successfully",
-		"data":    message,
-	})
-}
-
-// SendBusinessStickerMessage จัดการคำขอส่งสติกเกอร์ในนามธุรกิจ
-func (h *MessageHandler) SendBusinessStickerMessage(c *fiber.Ctx) error {
-	// ดึง User ID จาก context
-	userID, err := middleware.GetUserUUID(c)
-	if err != nil {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"success": false,
-			"message": "Unauthorized: " + err.Error(),
-		})
-	}
-
-	businessID, err := utils.ParseUUIDParam(c, "businessId")
-	if err != nil {
-		return err // error response ถูกจัดการในฟังก์ชันแล้ว
-	}
-
-	conversationID, err := utils.ParseUUIDParam(c, "conversationId")
-	if err != nil {
-		return err // error response ถูกจัดการในฟังก์ชันแล้ว
-	}
-
-	// รับข้อมูลสติกเกอร์จาก request body
-	var input struct {
-		StickerID         uuid.UUID   `json:"sticker_id"`
-		StickerSetID      uuid.UUID   `json:"sticker_set_id"`
-		MediaURL          string      `json:"media_url"`
-		MediaThumbnailURL string      `json:"media_thumbnail_url"`
-		Metadata          types.JSONB `json:"metadata"`
-		ReplyToID         *uuid.UUID  `json:"reply_to_id"`
-	}
-
-	if err := c.BodyParser(&input); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"success": false,
-			"message": "Invalid request body: " + err.Error(),
-		})
-	}
-
-	// เรียกใช้ service
-	message, err := h.messageService.SendBusinessStickerMessage(
-		businessID,
-		conversationID,
-		userID,
-		input.StickerID,
-		input.StickerSetID,
-		input.MediaURL,
-		input.MediaThumbnailURL,
-		input.Metadata,
-		input.ReplyToID,
-	)
-
-	if err != nil {
-		statusCode := fiber.StatusInternalServerError
-		// ตรวจสอบประเภทข้อผิดพลาด
-		if err.Error() == "user is not an admin of this business" {
-			statusCode = fiber.StatusForbidden
-		} else if err.Error() == "this conversation does not belong to your business" {
-			statusCode = fiber.StatusForbidden
-		} else if err.Error() == "sticker URL is required" {
-			statusCode = fiber.StatusBadRequest
-		}
-
-		return c.Status(statusCode).JSON(fiber.Map{
-			"success": false,
-			"message": err.Error(),
-		})
-	}
-
-	h.notificationService.NotifyNewMessage(conversationID, message)
-
-	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
-		"success": true,
-		"message": "Business sticker sent successfully",
-		"data":    message,
-	})
-}
-
-// SendBusinessImageMessage จัดการคำขอส่งรูปภาพในนามธุรกิจ
-func (h *MessageHandler) SendBusinessImageMessage(c *fiber.Ctx) error {
-	// ดึง User ID จาก context
-	userID, err := middleware.GetUserUUID(c)
-	if err != nil {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"success": false,
-			"message": "Unauthorized: " + err.Error(),
-		})
-	}
-
-	businessID, err := utils.ParseUUIDParam(c, "businessId")
-	if err != nil {
-		return err // error response ถูกจัดการในฟังก์ชันแล้ว
-	}
-
-	conversationID, err := utils.ParseUUIDParam(c, "conversationId")
-	if err != nil {
-		return err // error response ถูกจัดการในฟังก์ชันแล้ว
-	}
-
-	// รับข้อมูลรูปภาพจาก request body
-	var input struct {
-		MediaURL          string      `json:"media_url"`
-		MediaThumbnailURL string      `json:"media_thumbnail_url"`
-		Caption           string      `json:"caption"`
-		Metadata          types.JSONB `json:"metadata"`
-		ReplyToID         *uuid.UUID  `json:"reply_to_id"`
-	}
-
-	if err := c.BodyParser(&input); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"success": false,
-			"message": "Invalid request body: " + err.Error(),
-		})
-	}
-
-	// เรียกใช้ service
-	message, err := h.messageService.SendBusinessImageMessage(
-		businessID,
-		conversationID,
-		userID,
-		input.MediaURL,
-		input.MediaThumbnailURL,
-		input.Caption,
-		input.Metadata,
-		input.ReplyToID,
-	)
-
-	if err != nil {
-		statusCode := fiber.StatusInternalServerError
-		// ตรวจสอบประเภทข้อผิดพลาด
-		if err.Error() == "user is not an admin of this business" {
-			statusCode = fiber.StatusForbidden
-		} else if err.Error() == "this conversation does not belong to your business" {
-			statusCode = fiber.StatusForbidden
-		} else if err.Error() == "image URL is required" {
-			statusCode = fiber.StatusBadRequest
-		}
-
-		return c.Status(statusCode).JSON(fiber.Map{
-			"success": false,
-			"message": err.Error(),
-		})
-	}
-
-	h.notificationService.NotifyNewMessage(conversationID, message)
-
-	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
-		"success": true,
-		"message": "Business image sent successfully",
-		"data":    message,
-	})
-}
-
-// SendBusinessFileMessage จัดการคำขอส่งไฟล์ในนามธุรกิจ
-func (h *MessageHandler) SendBusinessFileMessage(c *fiber.Ctx) error {
-	// ดึง User ID จาก context
-	userID, err := middleware.GetUserUUID(c)
-	if err != nil {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"success": false,
-			"message": "Unauthorized: " + err.Error(),
-		})
-	}
-
-	businessID, err := utils.ParseUUIDParam(c, "businessId")
-	if err != nil {
-		return err // error response ถูกจัดการในฟังก์ชันแล้ว
-	}
-
-	conversationID, err := utils.ParseUUIDParam(c, "conversationId")
-	if err != nil {
-		return err // error response ถูกจัดการในฟังก์ชันแล้ว
-	}
-
-	// รับข้อมูลไฟล์จาก request body
-	var input struct {
-		MediaURL  string      `json:"media_url"`
-		FileName  string      `json:"file_name"`
-		FileSize  int64       `json:"file_size"`
-		FileType  string      `json:"file_type"`
-		Metadata  types.JSONB `json:"metadata"`
-		ReplyToID *uuid.UUID  `json:"reply_to_id"`
-	}
-
-	if err := c.BodyParser(&input); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"success": false,
-			"message": "Invalid request body: " + err.Error(),
-		})
-	}
-
-	// เรียกใช้ service
-	message, err := h.messageService.SendBusinessFileMessage(
-		businessID,
-		conversationID,
-		userID,
-		input.MediaURL,
-		input.FileName,
-		input.FileSize,
-		input.FileType,
-		input.Metadata,
-		input.ReplyToID,
-	)
-
-	if err != nil {
-		statusCode := fiber.StatusInternalServerError
-		// ตรวจสอบประเภทข้อผิดพลาด
-		if err.Error() == "user is not an admin of this business" {
-			statusCode = fiber.StatusForbidden
-		} else if err.Error() == "this conversation does not belong to your business" {
-			statusCode = fiber.StatusForbidden
-		} else if err.Error() == "file URL is required" {
-			statusCode = fiber.StatusBadRequest
-		}
-
-		return c.Status(statusCode).JSON(fiber.Map{
-			"success": false,
-			"message": err.Error(),
-		})
-	}
-
-	h.notificationService.NotifyNewMessage(conversationID, message)
-
-	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
-		"success": true,
-		"message": "Business file sent successfully",
-		"data":    message,
-	})
-}

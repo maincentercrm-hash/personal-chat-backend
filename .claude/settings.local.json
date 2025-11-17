@@ -9,7 +9,16 @@
       "Bash(git checkout:*)",
       "Bash(git tag:*)",
       "Bash(go list:*)",
-      "Bash(refector_plan/dependencies_before.txt)"
+      "Bash(refector_plan/dependencies_before.txt)",
+      "Bash(go mod tidy:*)",
+      "Bash(go.mod)",
+      "Bash(go build:*)",
+      "Bash(awk:*)",
+      "Bash(go vet:*)",
+      "Bash(cat:*)",
+      "Bash(domain/service/conversations_service.go)",
+      "mcp__ide__getDiagnostics",
+      "Bash(timeout 30 go build:*)"
     ],
     "deny": [],
     "ask": []

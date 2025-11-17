@@ -14,9 +14,6 @@ type ConversationService interface {
 	// CreateGroupConversation สร้างการสนทนาแบบกลุ่ม
 	CreateGroupConversation(userID uuid.UUID, title, iconURL string, memberIDs []uuid.UUID) (*dto.ConversationDTO, error)
 
-	// CreateBusinessConversation สร้างการสนทนากับธุรกิจ
-	CreateBusinessConversation(userID, businessID uuid.UUID) (*dto.ConversationDTO, error)
-
 	// GetUserConversations ดึงรายการการสนทนาทั้งหมดของผู้ใช้
 	GetUserConversations(userID uuid.UUID, limit, offset int, convType string, pinned bool) ([]*dto.ConversationDTO, int, error)
 
@@ -59,35 +56,15 @@ type ConversationService interface {
 	// UpdateConversation อัปเดตข้อมูลการสนทนา
 	UpdateConversation(id uuid.UUID, updateData types.JSONB) error
 
-	/** ################### FOR BUSINESS ONLY ################## */
+	// GetConversationMediaSummary ดึงสรุปจำนวน media และ link ในการสนทนา
+	GetConversationMediaSummary(conversationID, userID uuid.UUID) (*dto.MediaSummaryDTO, error)
 
-	// GetBusinessConversations ดึงการสนทนาทั้งหมดของธุรกิจ (โหมดปกติ)
-	GetBusinessConversations(businessID uuid.UUID, adminID uuid.UUID, limit, offset int) ([]*dto.ConversationDTO, int, error)
+	// GetConversationMediaByType ดึงรายละเอียด media ตามประเภทพร้อม pagination
+	GetConversationMediaByType(conversationID, userID uuid.UUID, mediaType string, limit, offset int) (*dto.MediaListDTO, error)
 
-	// GetBusinessConversationsBeforeTime ดึงการสนทนาธุรกิจที่เก่ากว่าเวลาที่ระบุ
-	GetBusinessConversationsBeforeTime(businessID uuid.UUID, adminID uuid.UUID, beforeTime string, limit int) ([]*dto.ConversationDTO, int, error)
+	// SetHiddenStatus ตั้งค่าสถานะการซ่อนการสนทนา
+	SetHiddenStatus(conversationID, userID uuid.UUID, isHidden bool) error
 
-	// GetBusinessConversationsAfterTime ดึงการสนทนาธุรกิจที่ใหม่กว่าเวลาที่ระบุ
-	GetBusinessConversationsAfterTime(businessID uuid.UUID, adminID uuid.UUID, afterTime string, limit int) ([]*dto.ConversationDTO, int, error)
-
-	// GetBusinessConversationsBeforeID ดึงการสนทนาธุรกิจที่เก่ากว่า ID ที่ระบุ
-	GetBusinessConversationsBeforeID(businessID uuid.UUID, adminID uuid.UUID, beforeID uuid.UUID, limit int) ([]*dto.ConversationDTO, int, error)
-
-	// GetBusinessConversationsAfterID ดึงการสนทนาธุรกิจที่ใหม่กว่า ID ที่ระบุ
-	GetBusinessConversationsAfterID(businessID uuid.UUID, adminID uuid.UUID, afterID uuid.UUID, limit int) ([]*dto.ConversationDTO, int, error)
-
-	// GetBusinessConversationMessages ดึงข้อความในการสนทนาธุรกิจ (โหมดปกติ)
-	GetBusinessConversationMessages(conversationID, businessID uuid.UUID, limit, offset int) ([]*dto.MessageDTO, int64, error)
-
-	// GetBusinessMessageContext ดึงข้อความเป้าหมายพร้อมบริบทสำหรับธุรกิจ (Jump to Message)
-	GetBusinessMessageContext(conversationID, businessID uuid.UUID, targetID string, beforeCount, afterCount int) ([]*dto.MessageDTO, bool, bool, error)
-
-	// GetBusinessMessagesBeforeID ดึงข้อความธุรกิจที่เก่ากว่า ID ที่ระบุ
-	GetBusinessMessagesBeforeID(conversationID, businessID uuid.UUID, beforeID string, limit int) ([]*dto.MessageDTO, int64, error)
-
-	// GetBusinessMessagesAfterID ดึงข้อความธุรกิจที่ใหม่กว่า ID ที่ระบุ
-	GetBusinessMessagesAfterID(conversationID, businessID uuid.UUID, afterID string, limit int) ([]*dto.MessageDTO, int64, error)
-
-	// CheckConversationBelongsToBusiness ตรวจสอบว่าการสนทนาเป็นของธุรกิจ
-	CheckConversationBelongsToBusiness(conversationID, businessID uuid.UUID) (bool, error)
+	// DeleteConversation ลบการสนทนา (smart delete - hide for direct, leave for group)
+	DeleteConversation(conversationID, userID uuid.UUID) (string, error)
 }

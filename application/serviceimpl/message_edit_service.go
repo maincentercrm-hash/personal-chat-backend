@@ -59,6 +59,21 @@ func (s *messageService) EditMessage(messageID, userID uuid.UUID, newContent str
 		fmt.Printf("Failed to save edit history: %v\n", err)
 	}
 
+	// Extract links จากเนื้อหาใหม่และอัพเดท metadata
+	links := s.extractLinks(newContent)
+	if len(links) > 0 {
+		// เพิ่ม links ใน metadata
+		if message.Metadata == nil {
+			message.Metadata = make(types.JSONB)
+		}
+		message.Metadata["links"] = links
+	} else {
+		// ถ้าไม่มี links ให้ลบ key "links" ออกจาก metadata
+		if message.Metadata != nil {
+			delete(message.Metadata, "links")
+		}
+	}
+
 	// อัพเดทข้อความ
 	now := time.Now()
 	message.Content = newContent

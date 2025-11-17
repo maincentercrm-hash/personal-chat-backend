@@ -36,6 +36,7 @@ type WebSocketPort interface {
 	// Friend notifications
 	BroadcastFriendRequestReceived(userID uuid.UUID, request interface{}) error
 	BroadcastFriendRequestAccepted(userID uuid.UUID, friendship interface{}) error
+	BroadcastFriendRequestRejected(userID uuid.UUID, friendship interface{}) error
 	BroadcastFriendRemoved(userID, friendID uuid.UUID)
 
 	// User notifications

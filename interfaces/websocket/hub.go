@@ -270,7 +270,6 @@ func (h *Hub) GetStats() map[string]interface{} {
 	return map[string]interface{}{
 		"total_connections":       totalClients,
 		"unique_users":            totalUsers,
-		"business_connections":    totalBusinesses,
 		"active_conversations":    totalConversations,
 		"total_messages":          messages,
 		"uptime":                  time.Since(h.startTime).String(),
@@ -319,19 +318,10 @@ func (h *Hub) registerClient(client *Client) {
 	h.userConnections[client.UserID] = append(h.userConnections[client.UserID], client.ID)
 	h.userConnectionsMux.Unlock()
 
-	// Add to business connections if applicable
-	if client.BusinessID != nil {
-	}
-
 	// Load conversations based on connection type
 	if h.conversationService != nil {
-		if client.BusinessID != nil {
-			// Business connection - load business conversations
-			go h.loadBusinessConversations(client)
-		} else {
-			// Regular user connection - load user conversations
-			go h.loadUserConversations(client)
-		}
+		// Regular user connection - load user conversations
+		go h.loadUserConversations(client)
 	} else {
 		log.Println("Warning: ConversationService is nil, skipping conversation loading")
 	}
@@ -455,14 +445,6 @@ func (h *Hub) unregisterClient(client *Client) {
 	}
 	h.userConnectionsMux.Unlock()
 
-	// Remove from business connections
-	if client.BusinessID != nil {
-			h.removeClientFromSlice(&connections, client.ID)
-			if len(connections) == 0 {
-			} else {
-			}
-		}
-	}
 
 	// Remove from conversation subscriptions
 	h.removeClientFromAllConversations(client.ID)

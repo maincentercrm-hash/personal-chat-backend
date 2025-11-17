@@ -138,10 +138,7 @@ func (s *conversationService) GetUserConversations(userID uuid.UUID, limit, offs
 	for _, conversation := range conversations {
 		dto, err := s.convertToConversationDTO(conversation, userID)
 		if err != nil {
-				filteredCount++
-				continue
-			}
-			// ข้ามการสนทนาที่มีปัญหาอื่นๆ
+			filteredCount++
 			continue
 		}
 		dtos = append(dtos, dto)
@@ -153,14 +150,11 @@ func (s *conversationService) GetUserConversations(userID uuid.UUID, limit, offs
 	return dtos, adjustedTotal, nil
 }
 
-// ฟังก์ชันช่วยเหลือ
-// application/serviceimpl/conversation_service.go
 func (s *conversationService) convertToConversationDTO(conversation *models.Conversation, userID uuid.UUID) (*dto.ConversationDTO, error) {
 	if conversation == nil {
 		return nil, errors.New("conversation is nil")
 	}
 
-	}
 
 	convDTO := &dto.ConversationDTO{
 		ID:              conversation.ID,
@@ -212,12 +206,6 @@ func (s *conversationService) convertToConversationDTO(conversation *models.Conv
 					}
 					convDTO.ContactInfo = contactInfo
 				}
-			}
-		}
-
-			if convDTO.IconURL == "" {
-			}
-
 			}
 		}
 	}
@@ -504,8 +492,19 @@ func (s *conversationService) ConvertToMessageDTO(msg *models.Message, userID uu
 		return nil, errors.New("message is nil")
 	}
 
+	// ดึง temp_id จาก metadata ถ้ามี (JSONB เป็น map[string]interface{} อยู่แล้ว)
+	tempID := ""
+	if msg.Metadata != nil {
+		if val, ok := msg.Metadata["tempId"].(string); ok {
+			tempID = val
+		} else if val, ok := msg.Metadata["temp_id"].(string); ok {
+			tempID = val
+		}
+	}
+
 	messageDTO := &dto.MessageDTO{
 		ID:                msg.ID,
+		TempID:            tempID,
 		ConversationID:    msg.ConversationID,
 		SenderID:          msg.SenderID,
 		SenderType:        msg.SenderType,
@@ -524,10 +523,33 @@ func (s *conversationService) ConvertToMessageDTO(msg *models.Message, userID uu
 		IsRead:            false, // ค่าเริ่มต้น จะอัปเดตทีหลัง
 	}
 
+	// ดึง file info และ sticker info จาก metadata ถ้ามี
+	if msg.Metadata != nil {
+		if fileName, ok := msg.Metadata["file_name"].(string); ok {
+			messageDTO.FileName = fileName
+		}
+		if fileSize, ok := msg.Metadata["file_size"].(float64); ok {
+			messageDTO.FileSize = int64(fileSize)
+		}
+		if fileType, ok := msg.Metadata["file_type"].(string); ok {
+			messageDTO.FileType = fileType
+		}
+		if stickerIDStr, ok := msg.Metadata["sticker_id"].(string); ok {
+			if stickerID, err := uuid.Parse(stickerIDStr); err == nil {
+				messageDTO.StickerID = &stickerID
+			}
+		}
+		if stickerSetIDStr, ok := msg.Metadata["sticker_set_id"].(string); ok {
+			if stickerSetID, err := uuid.Parse(stickerSetIDStr); err == nil {
+				messageDTO.StickerSetID = &stickerSetID
+			}
+		}
+	}
+
 	// 1. เพิ่มข้อมูลผู้ส่ง
 	s.addSenderInfoToDTO(messageDTO)
 
-	// 2. เพิ่มข้อมูลสถานะการอ่าน
+	// 2. เพิ่มข้อมูลสถานะการอ่าน (และคำนวณ status)
 	s.addReadStatusToDTO(messageDTO, userID)
 
 	// 3. เพิ่มข้อมูลข้อความที่ตอบกลับ (ถ้ามี)
@@ -544,11 +566,6 @@ func (s *conversationService) addSenderInfoToDTO(msgDTO *dto.MessageDTO) {
 		return
 	}
 
-		// ดึงข้อมูลธุรกิจ
-		business, err := s.businessRepo.GetByID(*msgDTO.BusinessID)
-		if err == nil && business != nil {
-		}
-	} else {
 		// ดึงข้อมูลผู้ใช้
 		user, err := s.userRepo.FindByID(*msgDTO.SenderID)
 		if err == nil && user != nil {
@@ -559,7 +576,6 @@ func (s *conversationService) addSenderInfoToDTO(msgDTO *dto.MessageDTO) {
 			}
 			msgDTO.SenderAvatar = user.ProfileImageURL
 		}
-	}
 }
 
 // addReadStatusToDTO เพิ่มข้อมูลสถานะการอ่านใน DTO
@@ -572,6 +588,15 @@ func (s *conversationService) addReadStatusToDTO(msgDTO *dto.MessageDTO, userID 
 
 	// คำนวณ ReadCount
 	msgDTO.ReadCount = len(reads)
+
+	// คำนวณ Status จาก read_count
+	if msgDTO.ReadCount >= 2 {
+		msgDTO.Status = "read" // มีคนอ่านแล้ว (นอกจากผู้ส่ง)
+	} else if msgDTO.ReadCount == 1 {
+		msgDTO.Status = "sent" // ผู้ส่งอ่านเองแล้ว
+	} else {
+		msgDTO.Status = "sent" // default
+	}
 
 	// ตรวจสอบว่าผู้ใช้อ่านข้อความแล้วหรือยัง
 	for _, read := range reads {
@@ -604,10 +629,6 @@ func (s *conversationService) addReplyToInfoToDTO(msgDTO *dto.MessageDTO) {
 
 	// เพิ่มข้อมูลผู้ส่งของข้อความที่ตอบกลับ
 	if replyMsg.SenderID != nil {
-			business, err := s.businessRepo.GetByID(*replyMsg.BusinessID)
-			if err == nil && business != nil {
-			}
-		} else {
 			user, err := s.userRepo.FindByID(*replyMsg.SenderID) // แก้ไขตรงนี้: เพิ่ม * เพื่อดึงค่าจาก pointer
 			if err == nil && user != nil {
 				if user.DisplayName != "" {
@@ -616,7 +637,6 @@ func (s *conversationService) addReplyToInfoToDTO(msgDTO *dto.MessageDTO) {
 					replyInfo.SenderName = user.Username
 				}
 			}
-		}
 	}
 
 	msgDTO.ReplyToMessage = replyInfo
@@ -924,6 +944,167 @@ func (s *conversationService) GetConversationsAfterID(userID, afterID uuid.UUID,
 // UpdateConversation อัปเดตข้อมูลการสนทนา
 func (s *conversationService) UpdateConversation(id uuid.UUID, updateData types.JSONB) error {
 	return s.conversationRepo.UpdateConversation(id, updateData)
+}
+
+// GetConversationMediaSummary ดึงสรุปจำนวน media และ link ในการสนทนา
+func (s *conversationService) GetConversationMediaSummary(conversationID, userID uuid.UUID) (*dto.MediaSummaryDTO, error) {
+	// ตรวจสอบว่า user เป็นสมาชิกของการสนทนาหรือไม่
+	isMember, err := s.CheckMembership(userID, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	if !isMember {
+		return nil, errors.New("user is not a member of this conversation")
+	}
+
+	// ดึงข้อมูลสรุปจาก repository
+	typeSummary, err := s.messageRepo.GetMessageTypeSummary(conversationID)
+	if err != nil {
+		return nil, err
+	}
+
+	linkCount, err := s.messageRepo.CountMessagesWithLinks(conversationID)
+	if err != nil {
+		return nil, err
+	}
+
+	// สร้าง DTO
+	summary := &dto.MediaSummaryDTO{
+		ImageCount: typeSummary["image"],
+		VideoCount: typeSummary["video"],
+		FileCount:  typeSummary["file"],
+		LinkCount:  linkCount,
+		TotalMedia: typeSummary["image"] + typeSummary["video"] + typeSummary["file"],
+	}
+
+	return summary, nil
+}
+
+// GetConversationMediaByType ดึงรายละเอียด media ตามประเภทพร้อม pagination
+func (s *conversationService) GetConversationMediaByType(conversationID, userID uuid.UUID, mediaType string, limit, offset int) (*dto.MediaListDTO, error) {
+	// ตรวจสอบว่า user เป็นสมาชิกของการสนทนาหรือไม่
+	isMember, err := s.CheckMembership(userID, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	if !isMember {
+		return nil, errors.New("user is not a member of this conversation")
+	}
+
+	// ตรวจสอบ media type ที่รองรับ
+	validTypes := map[string]bool{
+		"image": true,
+		"video": true,
+		"file":  true,
+		"link":  true,
+	}
+	if !validTypes[mediaType] {
+		return nil, fmt.Errorf("invalid media type: %s", mediaType)
+	}
+
+	// ดึงข้อมูลจาก repository
+	messages, total, err := s.messageRepo.GetMediaByType(conversationID, mediaType, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+
+	// แปลงเป็น DTO
+	items := make([]*dto.MediaItemDTO, 0, len(messages))
+	for _, msg := range messages {
+		item := &dto.MediaItemDTO{
+			MessageID:    msg.ID.String(),
+			MessageType:  msg.MessageType,
+			Content:      msg.Content,
+			MediaURL:     msg.MediaURL,
+			ThumbnailURL: msg.MediaThumbnailURL,
+			CreatedAt:    msg.CreatedAt,
+		}
+
+		// เพิ่มข้อมูลไฟล์ถ้าเป็น file type
+		if msg.MessageType == "file" && msg.Metadata != nil {
+			if fileName, ok := msg.Metadata["file_name"].(string); ok {
+				item.FileName = fileName
+			}
+			if fileSize, ok := msg.Metadata["file_size"].(float64); ok {
+				item.FileSize = int64(fileSize)
+			}
+		}
+
+		// เพิ่ม metadata สำหรับ link type
+		if mediaType == "link" {
+			item.Metadata = msg.Metadata
+		}
+
+		items = append(items, item)
+	}
+
+	// สร้าง pagination
+	hasMore := int64(offset+limit) < total
+
+	result := &dto.MediaListDTO{
+		Data: items,
+		Pagination: dto.PaginationDTO{
+			Total:   total,
+			Limit:   limit,
+			Offset:  offset,
+			HasMore: hasMore,
+		},
+	}
+
+	return result, nil
+}
+
+// SetHiddenStatus ตั้งค่าสถานะการซ่อนการสนทนา
+func (s *conversationService) SetHiddenStatus(conversationID, userID uuid.UUID, isHidden bool) error {
+	// 1. ตรวจสอบว่าเป็นสมาชิก
+	isMember, err := s.conversationRepo.IsMember(conversationID, userID)
+	if err != nil {
+		return err
+	}
+	if !isMember {
+		return errors.New("you are not a member of this conversation")
+	}
+
+	// 2. ตั้งค่า hidden status
+	return s.conversationRepo.SetHiddenStatus(conversationID, userID, isHidden)
+}
+
+// DeleteConversation ลบการสนทนา (smart delete)
+// - Direct conversation: Hide
+// - Group conversation: Leave (Remove member)
+func (s *conversationService) DeleteConversation(conversationID, userID uuid.UUID) (string, error) {
+	// 1. ตรวจสอบว่าเป็นสมาชิก
+	isMember, err := s.conversationRepo.IsMember(conversationID, userID)
+	if err != nil {
+		return "", err
+	}
+	if !isMember {
+		return "", errors.New("you are not a member of this conversation")
+	}
+
+	// 2. ดึงข้อมูล conversation
+	conversation, err := s.conversationRepo.GetByID(conversationID)
+	if err != nil {
+		return "", err
+	}
+
+	// 3. จัดการตามประเภท
+	if conversation.Type == "direct" {
+		// Direct: Hide conversation
+		err = s.conversationRepo.SetHiddenStatus(conversationID, userID, true)
+		if err != nil {
+			return "", err
+		}
+		return "hidden", nil
+	} else {
+		// Group: Leave group - just hide for now (not remove member)
+		// เพื่อความง่ายและปลอดภัย ให้ hide เหมือน direct แทนการ remove member
+		err = s.conversationRepo.SetHiddenStatus(conversationID, userID, true)
+		if err != nil {
+			return "", err
+		}
+		return "hidden", nil
+	}
 }
 
 // application/serviceimpl/conversation_service.go

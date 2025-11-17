@@ -75,11 +75,19 @@ func (h *MessageReadHandler) MarkMessageAsRead(c *fiber.Ctx) error {
 
 	// ถ้ามี notificationService ให้ส่งการแจ้งเตือนผ่าน WebSocket
 	if h.notificationService != nil && conversationID != uuid.Nil {
+		// ดึง read_count ปัจจุบันหลังจาก mark as read
+		reads, err := h.messageReadService.GetMessageReads(messageUUID, userUUID)
+		readCount := 1 // default
+		if err == nil && len(reads) > 0 {
+			readCount = len(reads)
+		}
+
 		readData := map[string]interface{}{
 			"message_id":      messageUUID.String(),
 			"user_id":         userUUID.String(),
 			"conversation_id": conversationID.String(),
 			"read_at":         time.Now(),
+			"read_count":      readCount, // ⭐ เพิ่ม read_count
 		}
 
 		// ส่งการแจ้งเตือนไปยังสมาชิกในการสนทนา
@@ -199,7 +207,10 @@ func (h *MessageReadHandler) MarkAllMessagesAsRead(c *fiber.Ctx) error {
 	}
 
 	// ถ้ามี notificationService ให้ส่งการแจ้งเตือนผ่าน WebSocket
-	if h.notificationService != nil && conversationUUID != uuid.Nil {
+	if h.notificationService != nil && conversationUUID != uuid.Nil && markedCount > 0 {
+		// ⚠️ เนื่องจากเราไม่สามารถดึง message IDs ย้อนหลังได้หลัง mark แล้ว
+		// เราจะส่งแค่ conversation_id, user_id, และ marked_count
+		// Frontend จะต้องอัพเดทข้อความทั้งหมดใน conversation นั้นเอง
 		h.notificationService.NotifyMessageReadAll(conversationUUID, fiber.Map{
 			"conversation_id": conversationUUID.String(),
 			"user_id":         userUUID.String(),

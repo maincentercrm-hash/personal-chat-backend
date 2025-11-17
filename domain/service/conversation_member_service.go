@@ -11,6 +11,12 @@ type ConversationMemberService interface {
 	// AddMember เพิ่มสมาชิกในการสนทนากลุ่ม
 	AddMember(userID, conversationID, newMemberID uuid.UUID) (*dto.MemberDTO, error)
 
+	// BulkAddMembers เพิ่มสมาชิกหลายคนพร้อมกันในการสนทนากลุ่ม
+	BulkAddMembers(userID, conversationID uuid.UUID, newMemberIDs []uuid.UUID) (addedMembers []*dto.MemberDTO, failed []struct {
+		UserID uuid.UUID
+		Reason string
+	}, err error)
+
 	// GetMembers ดึงรายการสมาชิกในการสนทนา
 	GetMembers(userID, conversationID uuid.UUID, page, limit int) ([]*dto.MemberDTO, int, error)
 
