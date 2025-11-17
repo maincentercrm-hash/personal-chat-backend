@@ -19,6 +19,8 @@ type ConversationMember struct {
 	LastReadAt           *time.Time  `json:"last_read_at,omitempty" gorm:"type:timestamp with time zone"`
 	IsMuted              bool        `json:"is_muted" gorm:"default:false"`
 	IsPinned             bool        `json:"is_pinned" gorm:"default:false"`
+	IsHidden             bool        `json:"is_hidden" gorm:"default:false"`
+	HiddenAt             *time.Time  `json:"hidden_at,omitempty" gorm:"type:timestamp with time zone"`
 	Nickname             string      `json:"nickname,omitempty" gorm:"type:varchar(100)"`
 	NotificationSettings types.JSONB `json:"notification_settings,omitempty" gorm:"type:jsonb;default:'{}'::jsonb"`
 

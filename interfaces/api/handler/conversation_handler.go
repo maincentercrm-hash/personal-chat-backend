@@ -18,22 +18,16 @@ import (
 // ConversationHandler จัดการ HTTP requests เกี่ยวกับการสนทนา
 type ConversationHandler struct {
 	conversationService           service.ConversationService
-	businessAdminService          service.BusinessAdminService
-	businessWelcomeMessageService service.BusinessWelcomeMessageService
 	notificationService           service.NotificationService
 }
 
 // NewConversationHandler สร้าง handler ใหม่
 func NewConversationHandler(
 	conversationService service.ConversationService,
-	businessAdminService service.BusinessAdminService,
-	businessWelcomeMessageService service.BusinessWelcomeMessageService,
 	notificationService service.NotificationService,
 ) *ConversationHandler {
 	return &ConversationHandler{
 		conversationService:           conversationService,
-		businessAdminService:          businessAdminService,
-		businessWelcomeMessageService: businessWelcomeMessageService,
 		notificationService:           notificationService,
 	}
 }
@@ -73,8 +67,6 @@ func (h *ConversationHandler) Create(c *fiber.Ctx) error {
 		return h.createDirectConversation(c, userID, input)
 	case "group":
 		return h.createGroupConversation(c, userID, input)
-	case "business":
-		return h.createBusinessConversation(c, userID, input)
 	default:
 		// ไม่ควรเข้าเงื่อนไขนี้เนื่องจากมีการตรวจสอบข้างต้นแล้ว
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -177,6 +169,16 @@ func (h *ConversationHandler) createGroupConversation(c *fiber.Ctx, userID uuid.
 		})
 	}
 
+	// รวมรายการผู้ใช้ทั้งหมดที่เกี่ยวข้อง (creator + members)
+	allMembers := append([]uuid.UUID{userID}, memberIDs...)
+
+	// ส่ง WebSocket notification แจ้งสมาชิกทุกคนในกลุ่ม
+	err = h.notificationService.NotifyConversationCreated(allMembers, conversation)
+	if err != nil {
+		log.Printf("Failed to send group conversation created notification: %v", err)
+		// ไม่ return error เพราะการส่ง notification ล้มเหลวไม่ควรทำให้ API ล้มเหลว
+	}
+
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"success":      true,
 		"message":      "Group conversation created successfully",
@@ -184,55 +186,6 @@ func (h *ConversationHandler) createGroupConversation(c *fiber.Ctx, userID uuid.
 	})
 }
 
-// createBusinessConversation สร้างการสนทนากับธุรกิจ
-func (h *ConversationHandler) createBusinessConversation(c *fiber.Ctx, userID uuid.UUID, input types.JSONB) error {
-	// ตรวจสอบ business_id
-	businessIDStr, ok := input["business_id"].(string)
-	if !ok || businessIDStr == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"success": false,
-			"message": "Business ID is required for business conversation",
-		})
-	}
-
-	// แปลง string เป็น UUID
-	businessID, err := uuid.Parse(businessIDStr)
-	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"success": false,
-			"message": "Invalid business ID format",
-		})
-	}
-
-	// เรียกใช้ service
-	conversation, err := h.conversationService.CreateBusinessConversation(userID, businessID)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"success": false,
-			"message": err.Error(),
-		})
-	}
-
-	// ส่ง welcome message หลังจากสร้าง conversation สำเร็จ
-	if h.businessWelcomeMessageService != nil {
-		err = h.businessWelcomeMessageService.ProcessConversationStartWelcomeMessages(
-			businessID,
-			userID,
-			conversation.ID,
-		)
-
-		if err != nil {
-			// เพียงบันทึกข้อผิดพลาด แต่ไม่หยุดการทำงาน
-			log.Printf("Error processing welcome messages: %v", err)
-		}
-	}
-
-	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
-		"success":      true,
-		"message":      "Business conversation created successfully",
-		"conversation": conversation,
-	})
-}
 
 // GetUserConversations ดึงรายการการสนทนาทั้งหมดของผู้ใช้
 func (h *ConversationHandler) GetUserConversations(c *fiber.Ctx) error {
@@ -715,6 +668,18 @@ func (h *ConversationHandler) UpdateConversation(c *fiber.Ctx) error {
 		})
 	}
 
+	// ส่ง WebSocket notification แจ้งสมาชิกทุกคนในกลุ่ม
+	notificationData := types.JSONB{
+		"conversation_id": conversationID.String(),
+	}
+	if title, ok := updateData["title"]; ok {
+		notificationData["title"] = title
+	}
+	if iconURL, ok := updateData["icon_url"]; ok {
+		notificationData["icon_url"] = iconURL
+	}
+	h.notificationService.NotifyConversationUpdated(conversationID, notificationData)
+
 	// ส่งผลลัพธ์กลับ
 	return c.JSON(fiber.Map{
 		"success": true,
@@ -722,21 +687,11 @@ func (h *ConversationHandler) UpdateConversation(c *fiber.Ctx) error {
 	})
 }
 
-//for business conversation
-
-// GetBusinessConversations ดูการสนทนาทั้งหมดของธุรกิจ (สำหรับ admin/owner)
-func (h *ConversationHandler) GetBusinessConversations(c *fiber.Ctx) error {
-	// ดึงข้อมูลจาก middleware (ถูก set โดย CheckBusinessAdmin)
-	businessID, ok := c.Locals("businessID").(uuid.UUID)
-	if !ok {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"success": false,
-			"message": "Business ID not found in context",
-		})
-	}
-
-	// ดึง admin ID จาก middleware
-	adminID, err := middleware.GetUserUUID(c)
+// GetMediaSummary ดึงสรุปจำนวน media และ link ในการสนทนา
+// GET /conversations/:conversationId/media/summary
+func (h *ConversationHandler) GetMediaSummary(c *fiber.Ctx) error {
+	// ดึง userID จาก context
+	userID, err := middleware.GetUserUUID(c)
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"success": false,
@@ -744,200 +699,220 @@ func (h *ConversationHandler) GetBusinessConversations(c *fiber.Ctx) error {
 		})
 	}
 
-	userRole, ok := c.Locals("businessRole").(string)
-	if !ok {
-		userRole = "member" // ค่าเริ่มต้น
-	}
-
-	// ดึงพารามิเตอร์
-	limit := c.QueryInt("limit", 20)
-	if limit > 50 {
-		limit = 50
-	}
-	offset := c.QueryInt("offset", 0)
-
-	// ตัวกรองเพิ่มเติม
-	beforeTime := c.Query("before_time")
-	afterTime := c.Query("after_time")
-	beforeID := c.Query("before_id")
-	afterID := c.Query("after_id")
-
-	// เรียกใช้ service เพื่อดึงการสนทนาของธุรกิจ
-	var conversations []*dto.ConversationDTO
-	var total int
-	var hasMore bool
-
-	if beforeTime != "" {
-		conversations, total, err = h.conversationService.GetBusinessConversationsBeforeTime(
-			businessID, adminID, beforeTime, limit) // เพิ่ม adminID
-	} else if afterTime != "" {
-		conversations, total, err = h.conversationService.GetBusinessConversationsAfterTime(
-			businessID, adminID, afterTime, limit) // เพิ่ม adminID
-	} else if beforeID != "" {
-		beforeUUID, parseErr := uuid.Parse(beforeID)
-		if parseErr != nil {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"success": false,
-				"message": "Invalid before_id format",
-			})
-		}
-		conversations, total, err = h.conversationService.GetBusinessConversationsBeforeID(
-			businessID, adminID, beforeUUID, limit) // เพิ่ม adminID
-	} else if afterID != "" {
-		afterUUID, parseErr := uuid.Parse(afterID)
-		if parseErr != nil {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"success": false,
-				"message": "Invalid after_id format",
-			})
-		}
-		conversations, total, err = h.conversationService.GetBusinessConversationsAfterID(
-			businessID, adminID, afterUUID, limit) // เพิ่ม adminID
-	} else {
-		// โหมดปกติ
-		conversations, total, err = h.conversationService.GetBusinessConversations(
-			businessID, adminID, limit, offset) // เพิ่ม adminID
-	}
-
+	// ดึง conversationID จาก path parameter
+	conversationIDStr := c.Params("conversationId")
+	conversationID, err := uuid.Parse(conversationIDStr)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"success": false,
-			"message": "Error retrieving business conversations: " + err.Error(),
+			"message": "Invalid conversation ID",
 		})
 	}
 
-	hasMore = len(conversations) >= limit
+	// เรียก service
+	summary, err := h.conversationService.GetConversationMediaSummary(conversationID, userID)
+	if err != nil {
+		if err.Error() == "user is not a member of this conversation" {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
 
 	return c.JSON(fiber.Map{
 		"success": true,
-		"message": "Business conversations retrieved successfully",
-		"data": fiber.Map{
-			"conversations": conversations,
-			"has_more":      hasMore,
-			"total":         total,
-			"business_id":   businessID,
-			"user_role":     userRole,
-			"pagination": fiber.Map{
-				"limit":  limit,
-				"offset": offset,
-			},
-		},
+		"data":    summary,
 	})
 }
 
-// GetBusinessConversationMessages ดูข้อความในการสนทนาธุรกิจ
-func (h *ConversationHandler) GetBusinessConversationMessages(c *fiber.Ctx) error {
-	// ดึงข้อมูลจาก middleware
-	businessID, ok := c.Locals("businessID").(uuid.UUID)
-	if !ok {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+// GetMediaByType ดึงรายละเอียด media ตามประเภทพร้อม pagination
+// GET /conversations/:conversationId/media?type=image&limit=20&offset=0
+func (h *ConversationHandler) GetMediaByType(c *fiber.Ctx) error {
+	// ดึง userID จาก context
+	userID, err := middleware.GetUserUUID(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"success": false,
-			"message": "Business ID not found in context",
+			"message": "Unauthorized: " + err.Error(),
 		})
 	}
 
-	userRole, ok := c.Locals("businessRole").(string)
-	if !ok {
-		userRole = "member"
+	// ดึง conversationID จาก path parameter
+	conversationIDStr := c.Params("conversationId")
+	conversationID, err := uuid.Parse(conversationIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"message": "Invalid conversation ID",
+		})
 	}
 
-	// ดึง conversation ID
+	// ดึง query parameters
+	mediaType := c.Query("type", "image")
+	limit := c.QueryInt("limit", 20)
+	offset := c.QueryInt("offset", 0)
+
+	// เรียก service
+	result, err := h.conversationService.GetConversationMediaByType(conversationID, userID, mediaType, limit, offset)
+	if err != nil {
+		if err.Error() == "user is not a member of this conversation" {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		}
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    result.Data,
+		"pagination": result.Pagination,
+	})
+}
+
+// GetMessageContext ดึงข้อความเป้าหมายพร้อมข้อความก่อนหน้าและถัดไป (Jump to Message)
+// GET /conversations/:conversationId/messages/context?targetId=xxx&before=10&after=10
+func (h *ConversationHandler) GetMessageContext(c *fiber.Ctx) error {
+	// ดึง userID จาก context
+	userID, err := middleware.GetUserUUID(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"success": false,
+			"message": "Unauthorized: " + err.Error(),
+		})
+	}
+
+	// ดึง conversationID จาก path parameter
+	conversationIDStr := c.Params("conversationId")
+	conversationID, err := uuid.Parse(conversationIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"message": "Invalid conversation ID",
+		})
+	}
+
+	// ดึง query parameters
+	targetID := c.Query("targetId")
+	if targetID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "targetId is required",
+		})
+	}
+
+	beforeCount := c.QueryInt("before", 10)
+	afterCount := c.QueryInt("after", 10)
+
+	// เรียก service
+	messages, hasBefore, hasAfter, err := h.conversationService.GetMessageContext(
+		conversationID, userID, targetID, beforeCount, afterCount,
+	)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success":    true,
+		"data":       messages,
+		"has_before": hasBefore,
+		"has_after":  hasAfter,
+	})
+}
+
+// HideConversation ซ่อน/แสดง conversation
+func (h *ConversationHandler) HideConversation(c *fiber.Ctx) error {
+	userID, err := middleware.GetUserUUID(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"success": false,
+			"message": "Unauthorized: " + err.Error(),
+		})
+	}
+
 	conversationID, err := utils.ParseUUIDParam(c, "conversationId")
 	if err != nil {
 		return err
 	}
 
-	// ตรวจสอบว่าการสนทนานี้เป็นของธุรกิจหรือไม่
-	belongsToBusiness, err := h.conversationService.CheckConversationBelongsToBusiness(conversationID, businessID)
+	var input dto.ConversationHideRequest
+	if err := c.BodyParser(&input); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"message": "Invalid request data: " + err.Error(),
+		})
+	}
+
+	err = h.conversationService.SetHiddenStatus(conversationID, userID, input.IsHidden)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"success": false,
-			"message": "Error checking conversation ownership: " + err.Error(),
+			"message": err.Error(),
 		})
 	}
 
-	if !belongsToBusiness {
-		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-			"success": false,
-			"message": "This conversation does not belong to your business",
-		})
-	}
-
-	// ดึงพารามิเตอร์
-	limit := c.QueryInt("limit", 20)
-	if limit > 50 {
-		limit = 50
-	}
-
-	beforeID := c.Query("before")
-	afterID := c.Query("after")
-	targetID := c.Query("target")
-
-	// ตัวแปรสำหรับผลลัพธ์
-	var messages []*dto.MessageDTO
-	var hasMore bool
-	var hasMoreBefore, hasMoreAfter bool = false, false
-	var total int64
-
-	if targetID != "" {
-		// โหมด Jump to Message
-		beforeCount := c.QueryInt("before_count", 10)
-		afterCount := c.QueryInt("after_count", 10)
-
-		messages, hasMoreBefore, hasMoreAfter, err = h.conversationService.GetBusinessMessageContext(
-			conversationID, businessID, targetID, beforeCount, afterCount)
-
-		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"success": false,
-				"message": "Error retrieving target message: " + err.Error(),
-			})
-		}
-
-		return c.JSON(fiber.Map{
-			"success": true,
-			"message": "Messages retrieved successfully",
-			"data": fiber.Map{
-				"messages":        messages,
-				"target_id":       targetID,
-				"has_more_before": hasMoreBefore,
-				"has_more_after":  hasMoreAfter,
-				"business_id":     businessID,
-				"user_role":       userRole,
-			},
-		})
-	} else if beforeID != "" {
-		messages, total, err = h.conversationService.GetBusinessMessagesBeforeID(
-			conversationID, businessID, beforeID, limit)
-		hasMore = len(messages) >= limit
-	} else if afterID != "" {
-		messages, total, err = h.conversationService.GetBusinessMessagesAfterID(
-			conversationID, businessID, afterID, limit)
-		hasMore = len(messages) >= limit
-	} else {
-		// โหลดข้อความล่าสุด
-		offset := c.QueryInt("offset", 0)
-		messages, total, err = h.conversationService.GetBusinessConversationMessages(
-			conversationID, businessID, limit, offset)
-		hasMore = int64(offset+len(messages)) < total
-	}
-
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"success": false,
-			"message": "Error retrieving messages: " + err.Error(),
-		})
+	var hiddenAt *time.Time
+	if input.IsHidden {
+		now := time.Now()
+		hiddenAt = &now
 	}
 
 	return c.JSON(fiber.Map{
 		"success": true,
-		"message": "Business conversation messages retrieved successfully",
+		"message": "Conversation hidden status updated successfully",
 		"data": fiber.Map{
-			"messages":    messages,
-			"has_more":    hasMore,
-			"total":       total,
-			"business_id": businessID,
-			"user_role":   userRole,
+			"is_hidden": input.IsHidden,
+			"hidden_at": hiddenAt,
 		},
 	})
 }
+
+// DeleteConversation ลบ conversation (smart delete)
+func (h *ConversationHandler) DeleteConversation(c *fiber.Ctx) error {
+	userID, err := middleware.GetUserUUID(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"success": false,
+			"message": "Unauthorized: " + err.Error(),
+		})
+	}
+
+	conversationID, err := utils.ParseUUIDParam(c, "conversationId")
+	if err != nil {
+		return err
+	}
+
+	action, err := h.conversationService.DeleteConversation(conversationID, userID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"message": err.Error(),
+		})
+	}
+
+	var message string
+	if action == "hidden" {
+		message = "Conversation hidden successfully"
+	} else {
+		message = "Left conversation successfully"
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"message": message,
+		"data": fiber.Map{
+			"conversation_id": conversationID.String(),
+			"action":          action,
+			"message":         message,
+		},
+	})
+}
+
+//for business conversation
+

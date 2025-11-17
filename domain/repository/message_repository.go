@@ -56,6 +56,8 @@ type MessageRepository interface {
 	// เมธอดสำหรับดึงข้อความทั้งหมดที่ไม่ใช่ของผู้ใช้ (สำหรับกรณีไม่มี LastReadAt)
 	GetAllUnreadMessages(conversationID uuid.UUID, excludeUserID uuid.UUID) ([]*models.Message, error)
 
-	GetCustomerMessagesAfterTime(conversationID uuid.UUID, afterTime time.Time, businessID uuid.UUID) ([]*models.Message, error)
-	GetAllCustomerMessages(conversationID uuid.UUID, businessID uuid.UUID) ([]*models.Message, error)
+	// สรุปข้อมูล media และ link
+	GetMessageTypeSummary(conversationID uuid.UUID) (map[string]int64, error)
+	CountMessagesWithLinks(conversationID uuid.UUID) (int64, error)
+	GetMediaByType(conversationID uuid.UUID, messageType string, limit, offset int) ([]*models.Message, int64, error)
 }

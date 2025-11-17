@@ -42,12 +42,18 @@ func (r *messageRepository) GetMessagesByConversationID(conversationID uuid.UUID
 	}
 
 	var messages []*models.Message
+	// Fetch ข้อความล่าสุดก่อน (DESC) แล้วค่อย reverse เป็น ASC
 	if err := r.db.Where("conversation_id = ?", conversationID).
-		Order("created_at DESC").
+		Order("created_at DESC"). // ดึงข้อความล่าสุดก่อน
 		Limit(limit).
 		Offset(offset).
 		Find(&messages).Error; err != nil {
 		return nil, 0, err
+	}
+
+	// Reverse array เพื่อให้เป็น ASC (เก่า → ใหม่) ก่อน return
+	for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
+		messages[i], messages[j] = messages[j], messages[i]
 	}
 
 	return messages, count, nil
@@ -284,17 +290,19 @@ func (r *messageRepository) GetMessagesBefore(conversationID, messageID uuid.UUI
 
 	var messages []*models.Message
 
-	// ดึงข้อความที่เก่ากว่าข้อความเป้าหมาย โดยเรียงจากใหม่ไปเก่า
-	if err := r.db.Where("conversation_id = ? AND created_at < ?", conversationID, targetMessage.CreatedAt).
-		Order("created_at DESC").
+	// ดึงข้อความที่เก่ากว่าข้อความเป้าหมาย โดยเรียงจากใหม่ไปเก่า (DESC) ก่อน
+	// ใช้ composite cursor (created_at + id) เพื่อป้องกัน overlap เมื่อมี messages ที่มี timestamp เดียวกัน
+	if err := r.db.Where("conversation_id = ? AND (created_at < ? OR (created_at = ? AND id < ?))",
+		conversationID, targetMessage.CreatedAt, targetMessage.CreatedAt, messageID).
+		Order("created_at DESC, id DESC"). // Query DESC ก่อน
 		Limit(limit).
 		Find(&messages).Error; err != nil {
 		return nil, err
 	}
 
-	// กลับลำดับให้เป็นจากเก่าไปใหม่
-	for i := 0; i < len(messages)/2; i++ {
-		messages[i], messages[len(messages)-1-i] = messages[len(messages)-1-i], messages[i]
+	// ✅ Reverse เป็น ASC (เก่า → ใหม่) ก่อน return
+	for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
+		messages[i], messages[j] = messages[j], messages[i]
 	}
 
 	return messages, nil
@@ -309,9 +317,11 @@ func (r *messageRepository) GetMessagesAfter(conversationID, messageID uuid.UUID
 
 	var messages []*models.Message
 
-	// ดึงข้อความที่ใหม่กว่าข้อความเป้าหมาย โดยเรียงจากเก่าไปใหม่
-	if err := r.db.Where("conversation_id = ? AND created_at > ?", conversationID, targetMessage.CreatedAt).
-		Order("created_at ASC").
+	// ดึงข้อความที่ใหม่กว่าข้อความเป้าหมาย โดยเรียงจากเก่าไปใหม่ (ASC)
+	// ใช้ composite cursor (created_at + id) เพื่อป้องกัน overlap เมื่อมี messages ที่มี timestamp เดียวกัน
+	if err := r.db.Where("conversation_id = ? AND (created_at > ? OR (created_at = ? AND id > ?))",
+		conversationID, targetMessage.CreatedAt, targetMessage.CreatedAt, messageID).
+		Order("created_at ASC, id ASC"). // ✅ Query ASC (เก่า → ใหม่)
 		Limit(limit).
 		Find(&messages).Error; err != nil {
 		return nil, err
@@ -350,61 +360,77 @@ func (r *messageRepository) GetAllUnreadMessages(conversationID uuid.UUID, exclu
 	return messages, err
 }
 
-// GetCustomerMessagesAfterTime ดึงข้อความจากลูกค้าหลังจากเวลาที่กำหนด
-func (r *messageRepository) GetCustomerMessagesAfterTime(conversationID uuid.UUID, afterTime time.Time, businessID uuid.UUID) ([]*models.Message, error) {
-	var messages []*models.Message
+// GetMessageTypeSummary นับจำนวนข้อความแต่ละประเภทในการสนทนา
+func (r *messageRepository) GetMessageTypeSummary(conversationID uuid.UUID) (map[string]int64, error) {
+	type Result struct {
+		MessageType string
+		Count       int64
+	}
 
-	// ดึงรายการ business admin IDs
-	var adminUserIDs []uuid.UUID
-	err := r.db.Model(&models.BusinessAdmin{}).
-		Select("user_id").
-		Where("business_id = ?", businessID).
-		Find(&adminUserIDs).Error
+	var results []Result
+	err := r.db.Model(&models.Message{}).
+		Select("message_type, COUNT(*) as count").
+		Where("conversation_id = ? AND is_deleted = ? AND message_type IN (?)",
+			conversationID,
+			false,
+			[]string{"image", "video", "file"}).
+		Group("message_type").
+		Find(&results).Error
+
 	if err != nil {
 		return nil, err
 	}
 
-	// ดึงข้อความที่ไม่ใช่จากแอดมิน และส่งหลังจากเวลาที่กำหนด
-	query := r.db.Where("conversation_id = ? AND created_at > ? AND is_deleted = ?",
-		conversationID, afterTime, false)
-
-	if len(adminUserIDs) > 0 {
-		// ไม่รวมข้อความจากแอดมิน
-		query = query.Where("sender_id NOT IN ?", adminUserIDs)
+	// แปลงผลลัพธ์เป็น map
+	summary := make(map[string]int64)
+	for _, result := range results {
+		summary[result.MessageType] = result.Count
 	}
 
-	// ไม่รวมข้อความระบบ
-	query = query.Where("message_type != ?", "system")
-
-	err = query.Find(&messages).Error
-	return messages, err
+	return summary, nil
 }
 
-// GetAllCustomerMessages ดึงข้อความจากลูกค้าทั้งหมด
-func (r *messageRepository) GetAllCustomerMessages(conversationID uuid.UUID, businessID uuid.UUID) ([]*models.Message, error) {
+// CountMessagesWithLinks นับจำนวนข้อความที่มีลิงก์ในการสนทนา
+func (r *messageRepository) CountMessagesWithLinks(conversationID uuid.UUID) (int64, error) {
+	var count int64
+	err := r.db.Model(&models.Message{}).
+		Where("conversation_id = ? AND is_deleted = ? AND metadata->>'links' IS NOT NULL AND metadata->>'links' != '[]'",
+			conversationID,
+			false).
+		Count(&count).Error
+
+	return count, err
+}
+
+// GetMediaByType ดึงรายละเอียดข้อความตามประเภทพร้อม pagination
+func (r *messageRepository) GetMediaByType(conversationID uuid.UUID, messageType string, limit, offset int) ([]*models.Message, int64, error) {
 	var messages []*models.Message
+	var total int64
 
-	// ดึงรายการ business admin IDs
-	var adminUserIDs []uuid.UUID
-	err := r.db.Model(&models.BusinessAdmin{}).
-		Select("user_id").
-		Where("business_id = ?", businessID).
-		Find(&adminUserIDs).Error
-	if err != nil {
-		return nil, err
+	query := r.db.Model(&models.Message{}).
+		Where("conversation_id = ? AND is_deleted = ?", conversationID, false)
+
+	// กรณีที่เป็น link ใช้เงื่อนไขพิเศษ
+	if messageType == "link" {
+		query = query.Where("metadata->>'links' IS NOT NULL AND metadata->>'links' != '[]'")
+	} else {
+		// กรณีอื่นๆ (image, video, file)
+		query = query.Where("message_type = ?", messageType)
 	}
 
-	// ดึงข้อความที่ไม่ใช่จากแอดมิน
-	query := r.db.Where("conversation_id = ? AND is_deleted = ?",
-		conversationID, false)
-
-	if len(adminUserIDs) > 0 {
-		query = query.Where("sender_id NOT IN ?", adminUserIDs)
+	// นับจำนวนทั้งหมด
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
 	}
 
-	// ไม่รวมข้อความระบบ
-	query = query.Where("message_type != ?", "system")
+	// ดึงข้อมูล
+	if err := query.Order("created_at DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&messages).Error; err != nil {
+		return nil, 0, err
+	}
 
-	err = query.Find(&messages).Error
-	return messages, err
+	return messages, total, nil
 }
+

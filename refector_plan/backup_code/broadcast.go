@@ -28,6 +28,10 @@ func (h *Hub) broadcastMessage(msg *BroadcastMessage) {
 		}
 	}
 
+	// Broadcast to business
+	if msg.BusinessID != nil {
+		h.sendToBusiness(*msg.BusinessID, data, msg.ExcludeID)
+	}
 
 	// Broadcast to conversation
 	if msg.ConvID != nil {
@@ -63,6 +67,32 @@ func (h *Hub) sendToUser(userID uuid.UUID, data []byte, excludeID *uuid.UUID) {
 	}
 }
 
+// sendToBusiness sends a message to all business connections
+func (h *Hub) sendToBusiness(businessID uuid.UUID, data []byte, excludeID *uuid.UUID) {
+	h.businessConnectionsMux.RLock()
+	clientIDs := h.businessConnections[businessID]
+	h.businessConnectionsMux.RUnlock()
+
+	for _, clientID := range clientIDs {
+		if excludeID != nil && clientID == *excludeID {
+			continue
+		}
+
+		h.clientsMux.RLock()
+		client, ok := h.clients[clientID]
+		h.clientsMux.RUnlock()
+
+		if ok {
+			select {
+			case client.Send <- data:
+			default:
+				go func() {
+					h.unregister <- client
+				}()
+			}
+		}
+	}
+}
 
 // broadcastToConversation sends a message to all members of a conversation
 func (h *Hub) broadcastToConversation(convID uuid.UUID, msgType MessageType, data interface{}, excludeID *uuid.UUID) {
@@ -186,9 +216,11 @@ func (h *Hub) NotifyBroadcast(msg *BroadcastMessage) {
 	case h.broadcast <- msg:
 		log.Printf("Message type %s queued to broadcast channel", msg.Type)
 	default:
-		log.Printf("Broadcast channel full, dropping message type %s", msg.Type)
+		log.Printf("Error: Broadcast channel is full or blocked. Message type %s dropped", msg.Type)
 	}
 }
+
+// BroadcastToConversation ส่งข้อความไปยังทุกคนในการสนทนา
 func (h *Hub) BroadcastToConversation(conversationID uuid.UUID, msgType MessageType, data interface{}) {
 
 	h.NotifyBroadcast(&BroadcastMessage{

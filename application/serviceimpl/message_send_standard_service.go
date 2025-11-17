@@ -29,9 +29,17 @@ func (s *messageService) SendTextMessage(conversationID, userID uuid.UUID, conte
 	}
 
 	// ดึงข้อมูลการสนทนา (เพื่อตรวจสอบประเภทการสนทนา)
-	conversation, err := s.conversationRepo.GetByID(conversationID)
 	if err != nil {
 		return nil, fmt.Errorf("error fetching conversation: %w", err)
+	}
+
+	// Extract links จากข้อความและเพิ่มลงใน metadata
+	links := s.extractLinks(content)
+	if len(links) > 0 {
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		metadata["links"] = links
 	}
 
 	// สร้าง message
@@ -49,10 +57,6 @@ func (s *messageService) SendTextMessage(conversationID, userID uuid.UUID, conte
 		IsDeleted:      false,
 	}
 
-	// ถ้าเป็นการสนทนากับธุรกิจ ให้เก็บข้อมูล business_id
-	if conversation.Type == "business" && conversation.BusinessID != nil {
-		message.BusinessID = conversation.BusinessID
-	}
 
 	// บันทึกข้อความลงในฐานข้อมูล
 	if err := s.messageRepo.Create(message); err != nil {
@@ -120,7 +124,6 @@ func (s *messageService) SendStickerMessage(conversationID, userID, stickerID, s
 	}
 
 	// ดึงข้อมูลการสนทนา (เพื่อตรวจสอบประเภทการสนทนา)
-	conversation, err := s.conversationRepo.GetByID(conversationID)
 	if err != nil {
 		return nil, fmt.Errorf("error fetching conversation: %w", err)
 	}
@@ -141,10 +144,6 @@ func (s *messageService) SendStickerMessage(conversationID, userID, stickerID, s
 		IsDeleted:         false,
 	}
 
-	// ถ้าเป็นการสนทนากับธุรกิจ ให้เก็บข้อมูล business_id
-	if conversation.Type == "business" && conversation.BusinessID != nil {
-		message.BusinessID = conversation.BusinessID
-	}
 
 	// บันทึกข้อความลงในฐานข้อมูล
 	if err := s.messageRepo.Create(message); err != nil {
@@ -195,7 +194,6 @@ func (s *messageService) SendImageMessage(conversationID, userID uuid.UUID, medi
 	}
 
 	// ดึงข้อมูลการสนทนา (เพื่อตรวจสอบประเภทการสนทนา)
-	conversation, err := s.conversationRepo.GetByID(conversationID)
 	if err != nil {
 		return nil, fmt.Errorf("error fetching conversation: %w", err)
 	}
@@ -217,10 +215,6 @@ func (s *messageService) SendImageMessage(conversationID, userID uuid.UUID, medi
 		IsDeleted:         false,
 	}
 
-	// ถ้าเป็นการสนทนากับธุรกิจ ให้เก็บข้อมูล business_id
-	if conversation.Type == "business" && conversation.BusinessID != nil {
-		message.BusinessID = conversation.BusinessID
-	}
 
 	// บันทึกข้อความลงในฐานข้อมูล
 	if err := s.messageRepo.Create(message); err != nil {
@@ -297,7 +291,6 @@ func (s *messageService) SendFileMessage(conversationID, userID uuid.UUID, media
 	}
 
 	// ดึงข้อมูลการสนทนา (เพื่อตรวจสอบประเภทการสนทนา)
-	conversation, err := s.conversationRepo.GetByID(conversationID)
 	if err != nil {
 		return nil, fmt.Errorf("error fetching conversation: %w", err)
 	}
@@ -318,10 +311,6 @@ func (s *messageService) SendFileMessage(conversationID, userID uuid.UUID, media
 		IsDeleted:      false,
 	}
 
-	// ถ้าเป็นการสนทนากับธุรกิจ ให้เก็บข้อมูล business_id
-	if conversation.Type == "business" && conversation.BusinessID != nil {
-		message.BusinessID = conversation.BusinessID
-	}
 
 	// บันทึกข้อความลงในฐานข้อมูล
 	if err := s.messageRepo.Create(message); err != nil {

@@ -19,6 +19,7 @@ type notificationService struct {
 	userRepo            repository.UserRepository
 	messageRepo         repository.MessageRepository
 	conversationRepo    repository.ConversationRepository
+	businessAccountRepo repository.BusinessAccountRepository
 }
 
 // NewNotificationService สร้าง instance ใหม่ของ NotificationService
@@ -27,12 +28,14 @@ func NewNotificationService(
 	userRepo repository.UserRepository,
 	messageRepo repository.MessageRepository,
 	conversationRepo repository.ConversationRepository,
+	businessAccountRepo repository.BusinessAccountRepository,
 ) service.NotificationService {
 	return &notificationService{
 		wsPort:              wsPort,
 		userRepo:            userRepo,
 		messageRepo:         messageRepo,
 		conversationRepo:    conversationRepo,
+		businessAccountRepo: businessAccountRepo,
 	}
 }
 
@@ -48,36 +51,9 @@ func (s *notificationService) NotifyNewMessage(conversationID uuid.UUID, message
 		return
 	}
 
-	// คำนวณ read_count จากฐานข้อมูล
-	readCount := 1 // เริ่มต้นที่ 1 (ผู้ส่งอ่านเอง)
-	if message.ID != uuid.Nil {
-		// นับจำนวนคนที่อ่านข้อความจริงๆ จาก database
-		reads, err := s.messageRepo.GetReads(message.ID)
-		if err == nil && len(reads) > 0 {
-			readCount = len(reads)
-		}
-	}
-
-	// คำนวณ status จาก read_count
-	status := "sent" // default: ส่งสำเร็จแล้ว
-	if readCount >= 2 {
-		status = "read" // มีคนอ่านแล้ว (นอกจากผู้ส่ง)
-	}
-
-	// ดึง temp_id จาก metadata ถ้ามี (JSONB เป็น map[string]interface{} อยู่แล้ว)
-	tempID := ""
-	if message.Metadata != nil {
-		if val, ok := message.Metadata["tempId"].(string); ok {
-			tempID = val
-		} else if val, ok := message.Metadata["temp_id"].(string); ok {
-			tempID = val
-		}
-	}
-
 	// สร้าง MessageDTO พื้นฐาน
 	messageDTO := &dto.MessageDTO{
 		ID:                message.ID,
-		TempID:            tempID,
 		ConversationID:    message.ConversationID,
 		SenderID:          message.SenderID,
 		SenderType:        message.SenderType,
@@ -91,33 +67,10 @@ func (s *notificationService) NotifyNewMessage(conversationID uuid.UUID, message
 		IsDeleted:         message.IsDeleted,
 		IsEdited:          message.IsEdited,
 		EditCount:         message.EditCount,
+		BusinessID:        message.BusinessID,
 		ReplyToID:         message.ReplyToID,
-		IsRead:            readCount >= 1,
-		ReadCount:         readCount,
-		Status:            status,
-	}
-
-	// ดึง file info และ sticker info จาก metadata ถ้ามี
-	if message.Metadata != nil {
-		if fileName, ok := message.Metadata["file_name"].(string); ok {
-			messageDTO.FileName = fileName
-		}
-		if fileSize, ok := message.Metadata["file_size"].(float64); ok {
-			messageDTO.FileSize = int64(fileSize)
-		}
-		if fileType, ok := message.Metadata["file_type"].(string); ok {
-			messageDTO.FileType = fileType
-		}
-		if stickerIDStr, ok := message.Metadata["sticker_id"].(string); ok {
-			if stickerID, err := uuid.Parse(stickerIDStr); err == nil {
-				messageDTO.StickerID = &stickerID
-			}
-		}
-		if stickerSetIDStr, ok := message.Metadata["sticker_set_id"].(string); ok {
-			if stickerSetID, err := uuid.Parse(stickerSetIDStr); err == nil {
-				messageDTO.StickerSetID = &stickerSetID
-			}
-		}
+		IsRead:            true, // ผู้ส่งอ่านแล้ว
+		ReadCount:         1,    // เริ่มต้นที่ 1 (ผู้ส่ง)
 	}
 
 	// เพิ่มข้อมูลผู้ส่ง
@@ -140,7 +93,19 @@ func (s *notificationService) NotifyNewMessage(conversationID uuid.UUID, message
 		}
 	}
 
+	// เพิ่มข้อมูลธุรกิจ (ถ้ามี)
+	if message.BusinessID != nil {
+		business, err := s.businessAccountRepo.GetByID(*message.BusinessID)
+		if err == nil && business != nil {
+			messageDTO.BusinessInfo = &dto.BusinessBasicDTO{
+				ID:      business.ID,
+				Name:    business.Name,
+				LogoURL: business.ProfileImageURL,
+			}
+		}
+	}
 
+	// เพิ่มข้อมูลการตอบกลับ (ถ้ามี)
 	// เพิ่มข้อมูลการตอบกลับ (ถ้ามี)
 	if message.ReplyToID != nil {
 		replyMsg, err := s.messageRepo.GetByID(*message.ReplyToID)
@@ -152,7 +117,19 @@ func (s *notificationService) NotifyNewMessage(conversationID uuid.UUID, message
 			}
 
 			// ตรวจสอบประเภทผู้ส่งข้อความที่ถูกตอบกลับ
-			if replyMsg.SenderID != nil {
+			if replyMsg.SenderType == "business" && replyMsg.BusinessID != nil {
+				// ถ้าเป็นข้อความจากธุรกิจ ใช้ชื่อธุรกิจเป็น sender_name
+				business, err := s.businessAccountRepo.GetByID(*replyMsg.BusinessID)
+				if err == nil && business != nil {
+					replyInfo.SenderName = business.Name
+				} else {
+					// กรณีหาข้อมูลธุรกิจไม่พบ ใช้ชื่อธุรกิจจากข้อความปัจจุบัน (ถ้ามี)
+					if message.BusinessID != nil && *message.BusinessID == *replyMsg.BusinessID &&
+						messageDTO.BusinessInfo != nil {
+						replyInfo.SenderName = messageDTO.BusinessInfo.Name
+					}
+				}
+			} else if replyMsg.SenderID != nil {
 				// ถ้าเป็นข้อความจากผู้ใช้ทั่วไป ใช้ชื่อผู้ใช้เป็น sender_name
 				replySender, err := s.userRepo.FindByID(*replyMsg.SenderID)
 				if err == nil && replySender != nil {
@@ -358,10 +335,30 @@ func (s *notificationService) NotifyNewConversation(conversation interface{}) er
 
 // =========== Business Notifications ===========
 
+// NotifyBusinessBroadcast แจ้งเตือนการประกาศจากธุรกิจ
+func (s *notificationService) NotifyBusinessBroadcast(userIDs []uuid.UUID, broadcast interface{}) {
+	s.wsPort.BroadcastBusinessBroadcast(userIDs, broadcast)
+}
 
+// NotifyBusinessNewFollower แจ้งเตือนผู้ติดตามใหม่ของธุรกิจ
+func (s *notificationService) NotifyBusinessNewFollower(businessID uuid.UUID, followerID uuid.UUID) {
+	s.wsPort.BroadcastBusinessNewFollower(businessID, followerID)
+}
 
+// NotifyBusinessWelcomeMessage แจ้งเตือนข้อความต้อนรับจากธุรกิจ
+func (s *notificationService) NotifyBusinessWelcomeMessage(userID uuid.UUID, businessID uuid.UUID, message interface{}) {
+	s.wsPort.BroadcastBusinessWelcomeMessage(userID, businessID, message)
+}
 
+// NotifyBusinessFollowStatusChanged แจ้งเตือนการเปลี่ยนสถานะการติดตามธุรกิจ
+func (s *notificationService) NotifyBusinessFollowStatusChanged(businessID uuid.UUID, userID uuid.UUID, isFollowing bool) {
+	s.wsPort.BroadcastBusinessFollowStatusChanged(businessID, userID, isFollowing)
+}
 
+// NotifyBusinessStatusChanged แจ้งเตือนการเปลี่ยนสถานะของธุรกิจ
+func (s *notificationService) NotifyBusinessStatusChanged(businessID uuid.UUID, status string) {
+	s.wsPort.BroadcastBusinessStatusChanged(businessID, status)
+}
 
 // =========== Friend Notifications ===========
 
@@ -427,38 +424,6 @@ func (s *notificationService) NotifyFriendRequestAccepted(friendship interface{}
 
 	// ส่งการแจ้งเตือนไปยังผู้ส่งคำขอเดิม (userID)
 	return s.wsPort.BroadcastFriendRequestAccepted(friendshipData.UserID, notificationData)
-}
-
-// NotifyFriendRequestRejected แจ้งเตือนการปฏิเสธคำขอเป็นเพื่อน
-func (s *notificationService) NotifyFriendRequestRejected(friendship interface{}) error {
-	// แปลง interface{} เป็น *models.UserFriendship
-	friendshipData, ok := friendship.(*models.UserFriendship)
-	if !ok {
-		return fmt.Errorf("invalid friendship type, expected *models.UserFriendship")
-	}
-
-	// สร้างข้อมูลพื้นฐานสำหรับการแจ้งเตือน
-	notificationData := map[string]interface{}{
-		"friendship_id": friendshipData.ID.String(),
-		"user_id":       friendshipData.UserID.String(),
-		"friend_id":     friendshipData.FriendID.String(),
-		"status":        friendshipData.Status,
-		"rejected_at":   friendshipData.UpdatedAt,
-	}
-
-	// ดึงข้อมูลผู้ปฏิเสธคำขอ (friend)
-	rejector, err := s.userRepo.FindByID(friendshipData.FriendID)
-	if err == nil && rejector != nil {
-		notificationData["rejector"] = map[string]interface{}{
-			"id":                rejector.ID.String(),
-			"username":          rejector.Username,
-			"display_name":      rejector.DisplayName,
-			"profile_image_url": rejector.ProfileImageURL,
-		}
-	}
-
-	// ส่งการแจ้งเตือนไปยังผู้ส่งคำขอเดิม (userID)
-	return s.wsPort.BroadcastFriendRequestRejected(friendshipData.UserID, notificationData)
 }
 
 // NotifyFriendRemoved แจ้งเตือนการลบเพื่อน

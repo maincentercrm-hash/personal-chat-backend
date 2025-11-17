@@ -26,9 +26,17 @@ func SetupConversationRoutes(
 	conversations.Get("/:conversationId/messages", conversationHandler.GetConversationMessages) // [succcess] 8.4 การดึงข้อความในการสนทนา [Y]
 	conversations.Patch("/:conversationId/pin", conversationHandler.TogglePinConversation)      // [success] 8.5 การเปลี่ยนสถานะปักหมุดของการสนทนา [Y]
 	conversations.Patch("/:conversationId/mute", conversationHandler.ToggleMuteConversation)    // [success] 8.6 การเปลี่ยนสถานะการปิดเสียงของการสนทนา [Y]
+	conversations.Patch("/:conversationId/hide", conversationHandler.HideConversation)          // การซ่อน/แสดงการสนทนา
+	conversations.Delete("/:conversationId", conversationHandler.DeleteConversation)            // การลบการสนทนา (smart delete)
+
+	// Media Gallery & Jump to Message
+	conversations.Get("/:conversationId/media/summary", conversationHandler.GetMediaSummary)      // ดึงสรุปจำนวน media และ link
+	conversations.Get("/:conversationId/media", conversationHandler.GetMediaByType)               // ดึงรายละเอียด media ตามประเภท
+	conversations.Get("/:conversationId/messages/context", conversationHandler.GetMessageContext) // Jump to Message
 
 	// การจัดการสมาชิกในกลุ่ม
 	conversations.Post("/:conversationId/members", conversationMemberHandler.AddConversationMember)              // [success] 9.1 การเพิ่มสมาชิกในการสนทนา [Y]
+	conversations.Post("/:conversationId/members/bulk", conversationMemberHandler.BulkAddConversationMembers)    // การเพิ่มสมาชิกหลายคนพร้อมกัน
 	conversations.Get("/:conversationId/members", conversationMemberHandler.GetConversationMembers)              // [success] 9.2 การดึงรายชื่อสมาชิกในการสนทนา [Y]
 	conversations.Delete("/:conversationId/members/:userId", conversationMemberHandler.RemoveConversationMember) // [success] 9.4 การลบสมาชิกจากการสนทนา [Y]
 	conversations.Patch("/:conversationId/members/:userId/admin", conversationMemberHandler.ToggleMemberAdmin)   // [success] 9.3 การเปลี่ยนสถานะแอดมินของสมาชิก [Y]

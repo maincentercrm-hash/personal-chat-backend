@@ -227,6 +227,49 @@ func (r *conversationRepository) SetMuteStatus(conversationID, userID uuid.UUID,
 	return nil
 }
 
+// SetHiddenStatus กำหนดสถานะการซ่อนการสนทนา
+func (r *conversationRepository) SetHiddenStatus(conversationID, userID uuid.UUID, isHidden bool) error {
+	updates := map[string]interface{}{
+		"is_hidden": isHidden,
+	}
+
+	if isHidden {
+		now := time.Now()
+		updates["hidden_at"] = now
+	} else {
+		updates["hidden_at"] = nil
+	}
+
+	result := r.db.Model(&models.ConversationMember{}).
+		Where("conversation_id = ? AND user_id = ?", conversationID, userID).
+		Updates(updates)
+
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("conversation member not found")
+	}
+	return nil
+}
+
+// IsHidden ตรวจสอบว่าการสนทนาถูกซ่อนหรือไม่
+func (r *conversationRepository) IsHidden(conversationID, userID uuid.UUID) (bool, error) {
+	var member models.ConversationMember
+
+	err := r.db.Where("conversation_id = ? AND user_id = ?", conversationID, userID).
+		First(&member).Error
+
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, errors.New("conversation member not found")
+		}
+		return false, err
+	}
+
+	return member.IsHidden, nil
+}
+
 // MarkAllMessagesAsRead มาร์คข้อความทั้งหมดในการสนทนาว่าอ่านแล้ว
 func (r *conversationRepository) MarkAllMessagesAsRead(conversationID, userID uuid.UUID) error {
 	// อัพเดท last_read_at ในตาราง conversation_members
@@ -376,7 +419,7 @@ func (r *conversationRepository) GetConversationsAfterID(userID, afterID uuid.UU
 	var memberIDs []uuid.UUID
 	err = r.db.Model(&models.ConversationMember{}).
 		Select("conversation_id").
-		Where("user_id = ?", userID).
+		Where("user_id = ? AND is_hidden = ?", userID, false).
 		Find(&memberIDs).Error
 	if err != nil {
 		return nil, 0, err
@@ -467,7 +510,7 @@ func (r *conversationRepository) GetConversationsBeforeID(userID, beforeID uuid.
 	var memberIDs []uuid.UUID
 	err = r.db.Model(&models.ConversationMember{}).
 		Select("conversation_id").
-		Where("user_id = ?", userID).
+		Where("user_id = ? AND is_hidden = ?", userID, false).
 		Find(&memberIDs).Error
 	if err != nil {
 		return nil, 0, err
@@ -544,7 +587,7 @@ func (r *conversationRepository) GetConversationsBeforeTime(userID uuid.UUID, be
 	var memberIDs []uuid.UUID
 	err := r.db.Model(&models.ConversationMember{}).
 		Select("conversation_id").
-		Where("user_id = ?", userID).
+		Where("user_id = ? AND is_hidden = ?", userID, false).
 		Find(&memberIDs).Error
 	if err != nil {
 		return nil, 0, err
@@ -610,7 +653,7 @@ func (r *conversationRepository) GetConversationsAfterTime(userID uuid.UUID, aft
 	var memberIDs []uuid.UUID
 	err := r.db.Model(&models.ConversationMember{}).
 		Select("conversation_id").
-		Where("user_id = ?", userID).
+		Where("user_id = ? AND is_hidden = ?", userID, false).
 		Find(&memberIDs).Error
 	if err != nil {
 		return nil, 0, err
@@ -682,7 +725,7 @@ func (r *conversationRepository) GetUserConversationsWithFilter(userID uuid.UUID
 	var memberIDs []uuid.UUID
 	err := r.db.Model(&models.ConversationMember{}).
 		Select("conversation_id").
-		Where("user_id = ?", userID).
+		Where("user_id = ? AND is_hidden = ?", userID, false).
 		Find(&memberIDs).Error
 	if err != nil {
 		return nil, 0, err
@@ -755,276 +798,3 @@ func (r *conversationRepository) GetUserConversationsWithFilter(userID uuid.UUID
 	return conversations, int(total), nil
 }
 
-// infrastructure/persistence/postgres/conversation_repository.go
-// เพิ่มเมธอดเหล่านี้ใน conversationRepository struct ที่มีอยู่แล้ว
-
-// ========================================
-// 🏢 BUSINESS CONVERSATION REPOSITORY IMPLEMENTATIONS
-// ========================================
-
-// GetBusinessConversations ดึงการสนทนาทั้งหมดของธุรกิจ
-func (r *conversationRepository) GetBusinessConversations(businessID uuid.UUID, limit, offset int) ([]*models.Conversation, int, error) {
-	// นับจำนวนทั้งหมด
-	var count int64
-	if err := r.db.Model(&models.Conversation{}).
-		Where("business_id = ? AND is_active = ?", businessID, true).
-		Count(&count).Error; err != nil {
-		return nil, 0, err
-	}
-
-	// ดึงข้อมูลการสนทนาของธุรกิจ
-	var conversations []*models.Conversation
-	err := r.db.Where("business_id = ? AND is_active = ?", businessID, true).
-		Order("COALESCE(last_message_at, updated_at) DESC").
-		Limit(limit).
-		Offset(offset).
-		Find(&conversations).Error
-
-	if err != nil {
-		return nil, 0, err
-	}
-
-	return conversations, int(count), nil
-}
-
-// GetBusinessConversationsBeforeTime ดึงการสนทนาธุรกิจที่เก่ากว่าเวลาที่ระบุ
-func (r *conversationRepository) GetBusinessConversationsBeforeTime(businessID uuid.UUID, beforeTime time.Time, limit int) ([]*models.Conversation, int, error) {
-	// เริ่มสร้าง query
-	baseQuery := r.db.Model(&models.Conversation{}).
-		Where("business_id = ? AND is_active = ?", businessID, true)
-
-	// เพิ่มเงื่อนไขเวลา
-	baseQuery = baseQuery.Where("COALESCE(last_message_at, updated_at) < ?", beforeTime)
-
-	// นับจำนวนทั้งหมด
-	var total int64
-	if err := baseQuery.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-
-	// ดึงข้อมูลตามเงื่อนไข
-	var conversations []*models.Conversation
-	err := baseQuery.
-		Order("COALESCE(last_message_at, updated_at) DESC").
-		Limit(limit).
-		Find(&conversations).Error
-	if err != nil {
-		return nil, 0, err
-	}
-
-	return conversations, int(total), nil
-}
-
-// GetBusinessConversationsAfterTime ดึงการสนทนาธุรกิจที่ใหม่กว่าเวลาที่ระบุ
-func (r *conversationRepository) GetBusinessConversationsAfterTime(businessID uuid.UUID, afterTime time.Time, limit int) ([]*models.Conversation, int, error) {
-	// เริ่มสร้าง query
-	baseQuery := r.db.Model(&models.Conversation{}).
-		Where("business_id = ? AND is_active = ?", businessID, true)
-
-	// เพิ่มเงื่อนไขเวลา
-	baseQuery = baseQuery.Where("COALESCE(last_message_at, updated_at) > ?", afterTime)
-
-	// นับจำนวนทั้งหมด
-	var total int64
-	if err := baseQuery.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-
-	// ดึงข้อมูลตามเงื่อนไข
-	var conversations []*models.Conversation
-	err := baseQuery.
-		Order("COALESCE(last_message_at, updated_at) ASC").
-		Limit(limit).
-		Find(&conversations).Error
-	if err != nil {
-		return nil, 0, err
-	}
-
-	// กลับลำดับให้เป็น DESC (จากใหม่ไปเก่า)
-	for i := 0; i < len(conversations)/2; i++ {
-		j := len(conversations) - i - 1
-		conversations[i], conversations[j] = conversations[j], conversations[i]
-	}
-
-	return conversations, int(total), nil
-}
-
-// GetBusinessConversationsBeforeID ดึงการสนทนาธุรกิจที่เก่ากว่า ID ที่ระบุ
-func (r *conversationRepository) GetBusinessConversationsBeforeID(businessID, beforeID uuid.UUID, limit int) ([]*models.Conversation, int, error) {
-	// ดึงการสนทนาเป้าหมายเพื่อดูเวลาของมัน
-	var targetConversation models.Conversation
-	err := r.db.First(&targetConversation, "id = ?", beforeID).Error
-	if err != nil {
-		return nil, 0, fmt.Errorf("error fetching target conversation: %w", err)
-	}
-
-	// เริ่มสร้าง query
-	baseQuery := r.db.Model(&models.Conversation{}).
-		Where("business_id = ? AND is_active = ?", businessID, true)
-
-	// ใช้ LastMessageAt หรือ UpdatedAt เพื่อเปรียบเทียบ
-	var timeCondition string
-	var args []interface{}
-
-	if targetConversation.LastMessageAt != nil {
-		timeCondition = "(COALESCE(last_message_at, updated_at) < ? OR (COALESCE(last_message_at, updated_at) = ? AND id < ?))"
-		args = []interface{}{targetConversation.LastMessageAt, targetConversation.LastMessageAt, beforeID}
-	} else {
-		timeCondition = "(COALESCE(last_message_at, updated_at) < ? OR (COALESCE(last_message_at, updated_at) = ? AND id < ?))"
-		args = []interface{}{targetConversation.UpdatedAt, targetConversation.UpdatedAt, beforeID}
-	}
-
-	baseQuery = baseQuery.Where(timeCondition, args...)
-
-	// นับจำนวนทั้งหมด
-	var total int64
-	if err := baseQuery.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-
-	// ดึงข้อมูลตามเงื่อนไข
-	var conversations []*models.Conversation
-	err = baseQuery.
-		Order("COALESCE(last_message_at, updated_at) DESC").
-		Limit(limit).
-		Find(&conversations).Error
-	if err != nil {
-		return nil, 0, err
-	}
-
-	return conversations, int(total), nil
-}
-
-// GetBusinessConversationsAfterID ดึงการสนทนาธุรกิจที่ใหม่กว่า ID ที่ระบุ
-func (r *conversationRepository) GetBusinessConversationsAfterID(businessID, afterID uuid.UUID, limit int) ([]*models.Conversation, int, error) {
-	// ดึงการสนทนาเป้าหมายเพื่อดูเวลาของมัน
-	var targetConversation models.Conversation
-	err := r.db.First(&targetConversation, "id = ?", afterID).Error
-	if err != nil {
-		return nil, 0, fmt.Errorf("error fetching target conversation: %w", err)
-	}
-
-	// เริ่มสร้าง query
-	baseQuery := r.db.Model(&models.Conversation{}).
-		Where("business_id = ? AND is_active = ?", businessID, true)
-
-	// ใช้ LastMessageAt หรือ UpdatedAt เพื่อเปรียบเทียบ
-	var timeCondition string
-	var args []interface{}
-
-	if targetConversation.LastMessageAt != nil {
-		timeCondition = "(COALESCE(last_message_at, updated_at) > ? OR (COALESCE(last_message_at, updated_at) = ? AND id > ?))"
-		args = []interface{}{targetConversation.LastMessageAt, targetConversation.LastMessageAt, afterID}
-	} else {
-		timeCondition = "(COALESCE(last_message_at, updated_at) > ? OR (COALESCE(last_message_at, updated_at) = ? AND id > ?))"
-		args = []interface{}{targetConversation.UpdatedAt, targetConversation.UpdatedAt, afterID}
-	}
-
-	baseQuery = baseQuery.Where(timeCondition, args...)
-
-	// นับจำนวนทั้งหมด
-	var total int64
-	if err := baseQuery.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-
-	// ดึงข้อมูลตามเงื่อนไข
-	var conversations []*models.Conversation
-	err = baseQuery.
-		Order("COALESCE(last_message_at, updated_at) ASC").
-		Limit(limit).
-		Find(&conversations).Error
-	if err != nil {
-		return nil, 0, err
-	}
-
-	// กลับลำดับให้เป็น DESC (จากใหม่ไปเก่า)
-	for i := 0; i < len(conversations)/2; i++ {
-		j := len(conversations) - i - 1
-		conversations[i], conversations[j] = conversations[j], conversations[i]
-	}
-
-	return conversations, int(total), nil
-}
-
-// CheckConversationBelongsToBusiness ตรวจสอบว่าการสนทนาเป็นของธุรกิจ
-func (r *conversationRepository) CheckConversationBelongsToBusiness(conversationID, businessID uuid.UUID) (bool, error) {
-	var conversation models.Conversation
-	err := r.db.Select("business_id").First(&conversation, "id = ?", conversationID).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return false, nil
-		}
-		return false, err
-	}
-
-	// ตรวจสอบว่า business_id ตรงกันหรือไม่
-	return conversation.BusinessID != nil && *conversation.BusinessID == businessID, nil
-}
-
-// ========================================
-// 🔍 ADDITIONAL HELPER METHODS สำหรับ Business Context
-// ========================================
-
-// GetBusinessConversationCount นับจำนวนการสนทนาทั้งหมดของธุรกิจ
-func (r *conversationRepository) GetBusinessConversationCount(businessID uuid.UUID) (int64, error) {
-	var count int64
-	err := r.db.Model(&models.Conversation{}).
-		Where("business_id = ? AND is_active = ?", businessID, true).
-		Count(&count).Error
-	return count, err
-}
-
-// GetBusinessActiveConversations ดึงการสนทนาที่มีข้อความล่าสุดในช่วงเวลาที่กำหนด
-func (r *conversationRepository) GetBusinessActiveConversations(businessID uuid.UUID, since time.Time, limit int) ([]*models.Conversation, error) {
-	var conversations []*models.Conversation
-	err := r.db.Where("business_id = ? AND is_active = ? AND last_message_at >= ?", businessID, true, since).
-		Order("last_message_at DESC").
-		Limit(limit).
-		Find(&conversations).Error
-	return conversations, err
-}
-
-// GetBusinessConversationWithCustomer ดึงการสนทนาระหว่างธุรกิจกับลูกค้าเฉพาะ
-func (r *conversationRepository) GetBusinessConversationWithCustomer(businessID, customerID uuid.UUID) (*models.Conversation, error) {
-	// หา conversation ที่เป็นของธุรกิจ
-	var businessConversations []models.Conversation
-	err := r.db.Where("business_id = ? AND type = ? AND is_active = ?", businessID, "business", true).
-		Find(&businessConversations).Error
-	if err != nil {
-		return nil, err
-	}
-
-	// ตรวจสอบแต่ละการสนทนาว่ามีลูกค้าคนนี้เป็นสมาชิกหรือไม่
-	for _, conv := range businessConversations {
-		var memberCount int64
-		err := r.db.Model(&models.ConversationMember{}).
-			Where("conversation_id = ? AND user_id = ?", conv.ID, customerID).
-			Count(&memberCount).Error
-		if err == nil && memberCount > 0 {
-			return &conv, nil
-		}
-	}
-
-	return nil, nil // ไม่พบการสนทนา
-}
-
-// FindBusinessUserConversation หาการสนทนาระหว่างธุรกิจและผู้ใช้
-func (r *conversationRepository) FindBusinessUserConversation(businessID, userID uuid.UUID) (uuid.UUID, error) {
-	// ใช้ model ของ Conversation โดยตรง
-	var conversation models.Conversation
-
-	err := r.db.Joins("JOIN conversation_members m ON conversations.id = m.conversation_id").
-		Where("conversations.business_id = ? AND conversations.type = 'business' AND m.user_id = ? AND conversations.is_active = true",
-			businessID, userID).
-		First(&conversation).Error
-
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return uuid.Nil, nil // ไม่พบการสนทนา
-		}
-		return uuid.Nil, err
-	}
-
-	return conversation.ID, nil
-}

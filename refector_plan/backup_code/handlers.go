@@ -704,6 +704,10 @@ func (h *ConversationCreateHandler) Handle(ctx context.Context, client *Client, 
 		conversation, err = h.hub.conversationService.CreateGroupConversation(
 			client.UserID, createData.Title, createData.IconURL, createData.MemberIDs,
 		)
+	case "business":
+		conversation, err = h.hub.conversationService.CreateBusinessConversation(
+			client.UserID, *createData.BusinessID,
+		)
 	}
 
 	if err != nil {

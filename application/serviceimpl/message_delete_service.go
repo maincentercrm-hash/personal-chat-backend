@@ -119,6 +119,11 @@ func (s *messageService) DeleteMessage(messageID, userID uuid.UUID) error {
 		}
 	}
 
+	// ส่ง WebSocket notification แจ้งว่าข้อความถูกลบ
+	if s.notificationService != nil {
+		s.notificationService.NotifyMessageDeleted(message.ConversationID, messageID)
+	}
+
 	return nil
 }
 

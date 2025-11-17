@@ -17,40 +17,26 @@ func RunMigration(db *gorm.DB) error {
 	err := db.AutoMigrate(
 		// โมเดลหลัก (ไม่มี FK ไปหาตารางอื่น)
 		&models.User{},
-		&models.BusinessAccount{},
 		&models.StickerSet{},
 
 		// โมเดลที่มี FK ไปหาตารางหลัก
-		&models.AnalyticsDaily{},
-		&models.Broadcast{},
-		&models.BusinessAdmin{},
 		&models.Conversation{},
-		&models.RichMenu{},
 		&models.Sticker{},
-		&models.Tag{},
-		&models.UserEvent{},
-		&models.UserBusinessFollow{},
 		&models.UserFriendship{},
 		&models.UserStickerSet{},
 		&models.RefreshToken{},
 		&models.TokenBlacklist{},
-		&models.BusinessWelcomeMessage{},
 
 		// โมเดลที่มี FK ไปหาตารางที่มี FK
 		&models.ConversationMember{},
 		&models.Message{},
-		&models.RichMenuArea{},
 		&models.UserFavoriteSticker{},
 		&models.UserRecentSticker{},
-		&models.UserRichMenu{},
-		&models.UserTag{},
-		&models.BroadcastDelivery{},
 
 		// โมเดลที่ขึ้นอยู่กับตารางอื่นที่ซับซ้อน
 		&models.MessageRead{},
 		&models.MessageEditHistory{},
 		&models.MessageDeleteHistory{},
-		&models.CustomerProfile{},
 	)
 
 	if err != nil {
@@ -78,11 +64,12 @@ func CreateIndices(db *gorm.DB) error {
 		return err
 	}
 
-	if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_user_business_follows_business_id ON user_business_follows(business_id)").Error; err != nil {
+
+	if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_conversation_members_user_id ON conversation_members(user_id)").Error; err != nil {
 		return err
 	}
 
-	if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_conversation_members_user_id ON conversation_members(user_id)").Error; err != nil {
+	if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_conversation_members_is_hidden ON conversation_members(is_hidden)").Error; err != nil {
 		return err
 	}
 
@@ -102,9 +89,6 @@ func CreateIndices(db *gorm.DB) error {
 		return err
 	}
 
-	if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_broadcasts_business_id ON broadcasts(business_id)").Error; err != nil {
-		return err
-	}
 
 	if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)").Error; err != nil {
 		return err

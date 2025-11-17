@@ -72,6 +72,11 @@ type ConversationMuteRequest struct {
 	IsMuted bool `json:"is_muted" validate:"required"`
 }
 
+// ConversationHideRequest สำหรับการซ่อน/แสดงการสนทนา
+type ConversationHideRequest struct {
+	IsHidden bool `json:"is_hidden" validate:"required"`
+}
+
 // ============ Response DTOs ============
 
 // ConversationDTO โครงสร้างข้อมูลสำหรับส่งกลับข้อมูลการสนทนา
@@ -92,6 +97,8 @@ type ConversationDTO struct {
 	UnreadCount     int         `json:"unread_count"`
 	IsPinned        bool        `json:"is_pinned"`
 	IsMuted         bool        `json:"is_muted"`
+	IsHidden        bool        `json:"is_hidden"`
+	HiddenAt        *time.Time  `json:"hidden_at,omitempty"`
 	ContactInfo     types.JSONB `json:"contact_info,omitempty"`
 	BusinessInfo    types.JSONB `json:"business_info,omitempty"`
 }
@@ -120,6 +127,25 @@ type ConversationMuteResponse struct {
 	GenericResponse
 	Data struct {
 		IsMuted bool `json:"is_muted"`
+	} `json:"data"`
+}
+
+// ConversationHideResponse สำหรับผลลัพธ์การซ่อน/แสดงการสนทนา
+type ConversationHideResponse struct {
+	GenericResponse
+	Data struct {
+		IsHidden bool       `json:"is_hidden"`
+		HiddenAt *time.Time `json:"hidden_at,omitempty"`
+	} `json:"data"`
+}
+
+// ConversationDeleteResponse สำหรับผลลัพธ์การลบการสนทนา
+type ConversationDeleteResponse struct {
+	GenericResponse
+	Data struct {
+		ConversationID string `json:"conversation_id"`
+		Action         string `json:"action"` // "hidden" or "left"
+		Message        string `json:"message"`
 	} `json:"data"`
 }
 

@@ -2,6 +2,7 @@
 package handler
 
 import (
+	"log"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -353,6 +354,13 @@ func (h *UserFriendshipHandler) RejectFriendRequest(c *fiber.Ctx) error {
 		})
 	}
 
+	// ส่ง WebSocket notification
+	err = h.notificationService.NotifyFriendRequestRejected(friendship)
+	if err != nil {
+		log.Printf("Failed to send friend request rejected notification: %v", err)
+		// ไม่ return error เพราะการส่ง notification ล้มเหลวไม่ควรทำให้ API ล้มเหลว
+	}
+
 	return c.JSON(fiber.Map{
 		"success": true,
 		"message": "Friend request rejected",
@@ -393,6 +401,9 @@ func (h *UserFriendshipHandler) RemoveFriend(c *fiber.Ctx) error {
 		})
 	}
 
+	// ส่ง WebSocket notification แจ้งทั้งสองฝ่าย
+	h.notificationService.NotifyFriendRemoved(userID, friendID)
+
 	return c.JSON(fiber.Map{
 		"success": true,
 		"message": "Friend removed successfully",
@@ -425,6 +436,9 @@ func (h *UserFriendshipHandler) BlockUser(c *fiber.Ctx) error {
 		})
 	}
 
+	// ส่ง WebSocket notification แจ้งผู้ถูกบล็อก
+	h.notificationService.NotifyUserBlocked(userID, targetID)
+
 	return c.JSON(fiber.Map{
 		"success": true,
 		"message": "User blocked successfully",
@@ -456,6 +470,9 @@ func (h *UserFriendshipHandler) UnblockUser(c *fiber.Ctx) error {
 			"error":   err.Error(),
 		})
 	}
+
+	// ส่ง WebSocket notification แจ้งผู้ถูกปลดบล็อก
+	h.notificationService.NotifyUserUnblocked(userID, targetID)
 
 	return c.JSON(fiber.Map{
 		"success": true,

@@ -13,19 +13,16 @@ import (
 type SearchHandler struct {
 	userService            service.UserService
 	userFriendshipService  service.UserFriendshipService
-	businessAccountService service.BusinessAccountService
 }
 
 // NewSearchHandler สร้าง instance ใหม่ของ SearchHandler
 func NewSearchHandler(
 	userService service.UserService,
 	userFriendshipService service.UserFriendshipService,
-	businessAccountService service.BusinessAccountService,
 ) *SearchHandler {
 	return &SearchHandler{
 		userService:            userService,
 		userFriendshipService:  userFriendshipService,
-		businessAccountService: businessAccountService,
 	}
 }
 
@@ -92,49 +89,6 @@ func (h *SearchHandler) SearchAll(c *fiber.Ctx) error {
 		}
 	}
 
-	if searchType == "all" || searchType == "business" {
-		// ค้นหาธุรกิจ
-		businesses, _, err := h.businessAccountService.SearchBusinesses(query, limit, offset, userID)
-		if err == nil {
-			// สร้างข้อมูลสำหรับส่งกลับ
-			var businessesData []types.JSONB
-			for _, business := range businesses {
-				// ตรวจสอบการติดตาม
-				isFollowing := false
-				if business.Settings != nil {
-					if value, ok := business.Settings["is_following"].(bool); ok {
-						isFollowing = value
-					}
-				}
-
-				// ดึงจำนวนผู้ติดตาม
-				followerCount := int64(0)
-				if business.Settings != nil {
-					if value, ok := business.Settings["follower_count"].(int64); ok {
-						followerCount = value
-					}
-				}
-
-				businessData := types.JSONB{
-					"id":                business.ID.String(),
-					"type":              "business",
-					"username":          business.Username,
-					"name":              business.Name,
-					"display_name":      business.Name, // ใช้ name เป็น display_name เพื่อความสอดคล้อง
-					"description":       business.Description,
-					"profile_image_url": business.ProfileImageURL,
-					"cover_image_url":   business.CoverImageURL,
-					"status":            business.Status,
-					"is_following":      isFollowing,
-					"follower_count":    followerCount,
-				}
-
-				businessesData = append(businessesData, businessData)
-			}
-
-			response["businesses"] = businessesData
-		}
-	}
 
 	return c.JSON(response)
 }

@@ -2,7 +2,6 @@
 package serviceimpl
 
 import (
-	"regexp"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,16 +11,14 @@ import (
 	"github.com/thizplus/gofiber-chat-api/domain/types"
 )
 
-// urlRegex สำหรับตรวจจับ URL ในข้อความ
-var urlRegex = regexp.MustCompile(`https?://[^\s]+`)
-
 // messageService เป็น implementation ของ MessageService interface
 type messageService struct {
 	messageRepo         repository.MessageRepository
 	messageReadRepo     repository.MessageReadRepository
 	conversationRepo    repository.ConversationRepository
 	userRepo            repository.UserRepository
-	notificationService service.NotificationService
+	businessAccountRepo repository.BusinessAccountRepository
+	businessAdminRepo   repository.BusinessAdminRepository
 }
 
 // NewMessageService สร้าง instance ใหม่ของ MessageService
@@ -30,18 +27,47 @@ func NewMessageService(
 	messageReadRepo repository.MessageReadRepository,
 	conversationRepo repository.ConversationRepository,
 	userRepo repository.UserRepository,
-	notificationService service.NotificationService,
+	businessAccountRepo repository.BusinessAccountRepository,
+	businessAdminRepo repository.BusinessAdminRepository,
+
 ) service.MessageService {
 	return &messageService{
 		messageRepo:         messageRepo,
 		messageReadRepo:     messageReadRepo,
 		conversationRepo:    conversationRepo,
 		userRepo:            userRepo,
-		notificationService: notificationService,
+		businessAccountRepo: businessAccountRepo,
+		businessAdminRepo:   businessAdminRepo,
 	}
 }
 
 // CheckBusinessAdmin ตรวจสอบว่าผู้ใช้เป็นแอดมินของธุรกิจหรือไม่
+func (s *messageService) CheckBusinessAdmin(userID, businessID uuid.UUID) (bool, bool, error) {
+
+	admin, err := s.businessAdminRepo.GetByUserAndBusinessID(userID, businessID)
+	if err != nil {
+		return false, false, err
+	}
+
+	if admin == nil {
+		return false, false, nil
+	}
+
+	// คืนค่า true สำหรับสถานะแอดมิน และค่า true ถ้ามีระดับสูง (owner, admin) หรือ false ถ้าระดับต่ำ (operator)
+	isHighLevel := admin.Role == "owner" || admin.Role == "admin"
+	return true, isHighLevel, nil
+}
+
+// CheckBusinessFollower ตรวจสอบว่าผู้ใช้เป็นผู้ติดตามธุรกิจหรือไม่
+func (s *messageService) CheckBusinessFollower(userID, businessID uuid.UUID) (bool, error) {
+
+	follow, err := s.businessAccountRepo.IsFollowing(userID, businessID)
+	if err != nil {
+		return false, err
+	}
+
+	return follow, nil
+}
 
 // createMessageRead สร้างบันทึกการอ่านข้อความ
 func (s *messageService) createMessageRead(messageID, userID uuid.UUID) error {
@@ -86,29 +112,4 @@ func (s *messageService) convertMetadataToJSON(metadata map[string]interface{}) 
 	}
 
 	return jsonb
-}
-
-// extractLinks ดึง URLs จากข้อความ
-func (s *messageService) extractLinks(content string) []string {
-	if content == "" {
-		return nil
-	}
-
-	links := urlRegex.FindAllString(content, -1)
-	if len(links) == 0 {
-		return nil
-	}
-
-	// Remove duplicates
-	uniqueLinks := make(map[string]bool)
-	result := []string{}
-
-	for _, link := range links {
-		if !uniqueLinks[link] {
-			uniqueLinks[link] = true
-			result = append(result, link)
-		}
-	}
-
-	return result
 }
