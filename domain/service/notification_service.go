@@ -3,6 +3,7 @@ package service
 
 import (
 	"github.com/google/uuid"
+	"github.com/thizplus/gofiber-chat-api/domain/dto"
 )
 
 // WebSocketNotifier interface สำหรับส่ง real-time notifications
@@ -11,6 +12,9 @@ type NotificationService interface {
 	NotifyNewMessage(conversationID uuid.UUID, message interface{})
 	NotifyMessageRead(conversationID uuid.UUID, message interface{})
 	NotifyMessageReadAll(conversationID uuid.UUID, message interface{})
+	NotifyMessageReadToSender(senderID uuid.UUID, message interface{})        // ส่ง message.read ไปยังผู้ส่งเท่านั้น
+	NotifyMessageReadAllToUser(userID uuid.UUID, message interface{})          // ส่ง message.read_all ไปยัง user ที่อ่าน
+	NotifyMessageDelivered(conversationID uuid.UUID, message interface{})
 	NotifyMessageEdited(conversationID uuid.UUID, message interface{})
 	NotifyMessageReply(conversationID uuid.UUID, message interface{})
 	NotifyMessageDeleted(conversationID uuid.UUID, messageID uuid.UUID)
@@ -23,6 +27,13 @@ type NotificationService interface {
 	NotifyUserAddedToConversation(conversationID uuid.UUID, userID uuid.UUID)
 	NotifyUserRemovedFromConversation(userID, conversationID uuid.UUID)
 	NotifyNewConversation(conversation interface{}) error
+
+	// Member role notifications
+	NotifyMemberRoleChanged(conversationID, userID uuid.UUID, oldRole, newRole string, changedByUserID uuid.UUID)
+	NotifyOwnershipTransferred(conversationID, previousOwnerID, newOwnerID uuid.UUID)
+
+	// Activity log notifications
+	NotifyNewActivity(conversationID uuid.UUID, activity *dto.ActivityDTO)
 
 
 	// Customer Profile notifications

@@ -4,6 +4,7 @@ package serviceimpl
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/thizplus/gofiber-chat-api/domain/dto"
@@ -85,6 +86,7 @@ func (s *notificationService) NotifyNewMessage(conversationID uuid.UUID, message
 		Content:           message.Content,
 		MediaURL:          message.MediaURL,
 		MediaThumbnailURL: message.MediaThumbnailURL,
+		AlbumFiles:        message.AlbumFiles,  // Copy album_files สำหรับ album messages
 		Metadata:          message.Metadata,
 		CreatedAt:         message.CreatedAt,
 		UpdatedAt:         message.UpdatedAt,
@@ -175,14 +177,29 @@ func (s *notificationService) NotifyNewMessage(conversationID uuid.UUID, message
 	s.wsPort.BroadcastNewMessage(message.ConversationID, messageDTO)
 }
 
-// NotifyMessageRead แจ้งเตือนการอ่านข้อความ
+// NotifyMessageRead แจ้งเตือนการอ่านข้อความ (เก่า - broadcast ไปทุกคน)
 func (s *notificationService) NotifyMessageRead(conversationID uuid.UUID, message interface{}) {
 	s.wsPort.BroadcastMessageRead(conversationID, message)
 }
 
-// NotifyMessageReadAll แจ้งเตือนการอ่านข้อความทั้งหมด
+// NotifyMessageReadAll แจ้งเตือนการอ่านข้อความทั้งหมด (เก่า - broadcast ไปทุกคน)
 func (s *notificationService) NotifyMessageReadAll(conversationID uuid.UUID, message interface{}) {
 	s.wsPort.BroadcastMessageReadAll(conversationID, message)
+}
+
+// NotifyMessageReadToSender ส่ง message.read event ไปยังผู้ส่งข้อความเท่านั้น (ใช้สำหรับ group chat)
+func (s *notificationService) NotifyMessageReadToSender(senderID uuid.UUID, message interface{}) {
+	s.wsPort.SendMessageReadToSender(senderID, message)
+}
+
+// NotifyMessageReadAllToUser ส่ง message.read_all event ไปยัง user ที่อ่าน (สำหรับ multi-device sync)
+func (s *notificationService) NotifyMessageReadAllToUser(userID uuid.UUID, message interface{}) {
+	s.wsPort.SendMessageReadAllToUser(userID, message)
+}
+
+// NotifyMessageDelivered แจ้งเตือนการส่งข้อความสำเร็จ
+func (s *notificationService) NotifyMessageDelivered(conversationID uuid.UUID, message interface{}) {
+	s.wsPort.BroadcastMessageDelivered(conversationID, message)
 }
 
 // NotifyMessageEdited แจ้งเตือนการแก้ไขข้อความ
@@ -373,24 +390,22 @@ func (s *notificationService) NotifyFriendRequestReceived(request interface{}) e
 		return fmt.Errorf("invalid request type, expected *models.UserFriendship")
 	}
 
-	// สร้างข้อมูลพื้นฐานสำหรับการแจ้งเตือน
-	notificationData := map[string]interface{}{
-		"request_id":   friendshipData.ID.String(),
-		"user_id":      friendshipData.UserID.String(),
-		"friend_id":    friendshipData.FriendID.String(),
-		"status":       friendshipData.Status,
-		"requested_at": friendshipData.RequestedAt,
+	// ดึงข้อมูลผู้ส่งคำขอ
+	sender, err := s.userRepo.FindByID(friendshipData.UserID)
+	if err != nil {
+		return fmt.Errorf("failed to get sender info: %w", err)
 	}
 
-	// ดึงข้อมูลผู้ส่งคำขอเพิ่มเติม
-	sender, err := s.userRepo.FindByID(friendshipData.UserID)
-	if err == nil && sender != nil {
-		notificationData["sender"] = map[string]interface{}{
+	// สร้างข้อมูลตาม spec
+	notificationData := map[string]interface{}{
+		"request_id": friendshipData.ID.String(),
+		"from": map[string]interface{}{
 			"id":                sender.ID.String(),
 			"username":          sender.Username,
 			"display_name":      sender.DisplayName,
 			"profile_image_url": sender.ProfileImageURL,
-		}
+		},
+		"created_at": friendshipData.RequestedAt.Format(time.RFC3339),
 	}
 
 	return s.wsPort.BroadcastFriendRequestReceived(friendshipData.FriendID, notificationData)
@@ -404,25 +419,22 @@ func (s *notificationService) NotifyFriendRequestAccepted(friendship interface{}
 		return fmt.Errorf("invalid friendship type, expected *models.UserFriendship")
 	}
 
-	// สร้างข้อมูลพื้นฐานสำหรับการแจ้งเตือน
-	notificationData := map[string]interface{}{
-		"friendship_id": friendshipData.ID.String(),
-		"user_id":       friendshipData.UserID.String(),
-		"friend_id":     friendshipData.FriendID.String(),
-		"status":        friendshipData.Status,
-		"accepted_at":   friendshipData.UpdatedAt,
-	}
-
 	// ดึงข้อมูลผู้ยอมรับคำขอ (friend)
 	acceptor, err := s.userRepo.FindByID(friendshipData.FriendID)
-	if err == nil && acceptor != nil {
-		notificationData["acceptor"] = map[string]interface{}{
+	if err != nil {
+		return fmt.Errorf("failed to get acceptor info: %w", err)
+	}
+
+	// สร้างข้อมูลตาม spec
+	notificationData := map[string]interface{}{
+		"request_id": friendshipData.ID.String(),
+		"by": map[string]interface{}{
 			"id":                acceptor.ID.String(),
 			"username":          acceptor.Username,
 			"display_name":      acceptor.DisplayName,
 			"profile_image_url": acceptor.ProfileImageURL,
-			"last_active_at":    acceptor.LastActiveAt,
-		}
+		},
+		"accepted_at": friendshipData.UpdatedAt.Format(time.RFC3339),
 	}
 
 	// ส่งการแจ้งเตือนไปยังผู้ส่งคำขอเดิม (userID)
@@ -437,24 +449,10 @@ func (s *notificationService) NotifyFriendRequestRejected(friendship interface{}
 		return fmt.Errorf("invalid friendship type, expected *models.UserFriendship")
 	}
 
-	// สร้างข้อมูลพื้นฐานสำหรับการแจ้งเตือน
+	// สร้างข้อมูลตาม spec (เฉพาะ request_id และ rejected_at)
 	notificationData := map[string]interface{}{
-		"friendship_id": friendshipData.ID.String(),
-		"user_id":       friendshipData.UserID.String(),
-		"friend_id":     friendshipData.FriendID.String(),
-		"status":        friendshipData.Status,
-		"rejected_at":   friendshipData.UpdatedAt,
-	}
-
-	// ดึงข้อมูลผู้ปฏิเสธคำขอ (friend)
-	rejector, err := s.userRepo.FindByID(friendshipData.FriendID)
-	if err == nil && rejector != nil {
-		notificationData["rejector"] = map[string]interface{}{
-			"id":                rejector.ID.String(),
-			"username":          rejector.Username,
-			"display_name":      rejector.DisplayName,
-			"profile_image_url": rejector.ProfileImageURL,
-		}
+		"request_id":  friendshipData.ID.String(),
+		"rejected_at": friendshipData.UpdatedAt.Format(time.RFC3339),
 	}
 
 	// ส่งการแจ้งเตือนไปยังผู้ส่งคำขอเดิม (userID)
@@ -493,6 +491,106 @@ func (s *notificationService) SendAlert(userID uuid.UUID, alert interface{}) {
 // NotifySystemMessage ส่งข้อความระบบไปยังผู้ใช้หลายคน
 func (s *notificationService) NotifySystemMessage(userIDs []uuid.UUID, message interface{}) {
 	s.wsPort.BroadcastSystemMessage(userIDs, message)
+}
+
+// =========== Member Role Notifications ===========
+
+// NotifyMemberRoleChanged แจ้งเตือนการเปลี่ยนแปลง role ของสมาชิก
+func (s *notificationService) NotifyMemberRoleChanged(conversationID, userID uuid.UUID, oldRole, newRole string, changedByUserID uuid.UUID) {
+	// ดึงข้อมูลผู้ใช้ที่ถูกเปลี่ยน role
+	user, err := s.userRepo.FindByID(userID)
+	if err != nil {
+		// ถ้าไม่พบผู้ใช้ ให้ส่งข้อมูลพื้นฐาน
+		notificationData := map[string]interface{}{
+			"conversation_id":   conversationID.String(),
+			"user_id":          userID.String(),
+			"old_role":         oldRole,
+			"new_role":         newRole,
+			"changed_by":       changedByUserID.String(),
+			"changed_at":       time.Now().Format(time.RFC3339),
+		}
+		s.wsPort.BroadcastMemberRoleChanged(conversationID, notificationData)
+		return
+	}
+
+	// ดึงข้อมูลผู้ที่ทำการเปลี่ยน
+	changedBy, _ := s.userRepo.FindByID(changedByUserID)
+
+	// สร้างข้อมูลการแจ้งเตือน
+	notificationData := map[string]interface{}{
+		"conversation_id": conversationID.String(),
+		"user": map[string]interface{}{
+			"id":                userID.String(),
+			"username":          user.Username,
+			"display_name":      user.DisplayName,
+			"profile_image_url": user.ProfileImageURL,
+		},
+		"old_role":   oldRole,
+		"new_role":   newRole,
+		"changed_at": time.Now().Format(time.RFC3339),
+	}
+
+	if changedBy != nil {
+		notificationData["changed_by"] = map[string]interface{}{
+			"id":                changedByUserID.String(),
+			"username":          changedBy.Username,
+			"display_name":      changedBy.DisplayName,
+			"profile_image_url": changedBy.ProfileImageURL,
+		}
+	}
+
+	// ส่ง notification ไปยังสมาชิกทุกคนในกลุ่ม
+	s.wsPort.BroadcastMemberRoleChanged(conversationID, notificationData)
+}
+
+// NotifyOwnershipTransferred แจ้งเตือนการโอนความเป็นเจ้าของ
+func (s *notificationService) NotifyOwnershipTransferred(conversationID, previousOwnerID, newOwnerID uuid.UUID) {
+	// ดึงข้อมูล owner เดิม
+	previousOwner, err := s.userRepo.FindByID(previousOwnerID)
+	if err != nil {
+		previousOwner = nil
+	}
+
+	// ดึงข้อมูล owner ใหม่
+	newOwner, err := s.userRepo.FindByID(newOwnerID)
+	if err != nil {
+		newOwner = nil
+	}
+
+	// สร้างข้อมูลการแจ้งเตือน
+	notificationData := map[string]interface{}{
+		"conversation_id":    conversationID.String(),
+		"previous_owner_id": previousOwnerID.String(),
+		"new_owner_id":      newOwnerID.String(),
+		"transferred_at":    time.Now().Format(time.RFC3339),
+	}
+
+	if previousOwner != nil {
+		notificationData["previous_owner"] = map[string]interface{}{
+			"id":                previousOwnerID.String(),
+			"username":          previousOwner.Username,
+			"display_name":      previousOwner.DisplayName,
+			"profile_image_url": previousOwner.ProfileImageURL,
+		}
+	}
+
+	if newOwner != nil {
+		notificationData["new_owner"] = map[string]interface{}{
+			"id":                newOwnerID.String(),
+			"username":          newOwner.Username,
+			"display_name":      newOwner.DisplayName,
+			"profile_image_url": newOwner.ProfileImageURL,
+		}
+	}
+
+	// ส่ง notification ไปยังสมาชิกทุกคนในกลุ่ม
+	s.wsPort.BroadcastOwnershipTransferred(conversationID, notificationData)
+}
+
+// NotifyNewActivity แจ้งเตือน activity ใหม่ในกลุ่ม
+func (s *notificationService) NotifyNewActivity(conversationID uuid.UUID, activity *dto.ActivityDTO) {
+	// ส่ง activity ไปยังสมาชิกทุกคนในกลุ่ม
+	s.wsPort.BroadcastNewActivity(conversationID, activity)
 }
 
 // =========== Customer Profile Notifications ===========
