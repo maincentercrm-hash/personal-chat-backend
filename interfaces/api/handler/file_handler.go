@@ -16,8 +16,8 @@ import (
 )
 
 const (
-	// MaxFileSize is 100MB (for most files)
-	MaxFileSize = 100 * 1024 * 1024
+	// MaxFileSize is 1GB (for videos and large files via presigned URL)
+	MaxFileSize = 1024 * 1024 * 1024
 	// DefaultPresignedExpiry is 15 minutes
 	DefaultPresignedExpiry = 15 * time.Minute
 	// MaxUploadsPerHour per user (rate limiting)
@@ -266,7 +266,7 @@ func (h *FileHandler) PrepareUpload(c *fiber.Ctx) error {
 	if req.Size > MaxFileSize {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"success": false,
-			"message": fmt.Sprintf("File size exceeds maximum allowed size of %d MB", MaxFileSize/(1024*1024)),
+			"message": fmt.Sprintf("File size exceeds maximum allowed size of %.1f GB", float64(MaxFileSize)/(1024*1024*1024)),
 		})
 	}
 
