@@ -543,6 +543,12 @@ func (s *messageService) ForwardMessages(messageIDs []uuid.UUID, targetConversat
 // notifyConversationUpdated ส่ง WebSocket event แจ้งการอัปเดต conversation พร้อม mention data
 // สำหรับแต่ละ member (personalized per user)
 func (s *messageService) notifyConversationUpdated(conversationID uuid.UUID, lastMessageText string, lastMessageAt time.Time, lastMessageID uuid.UUID) {
+	// Auto-unhide: เมื่อมีข้อความใหม่ ให้ unhide conversation สำหรับทุก member ที่เคยซ่อนไว้
+	// เพื่อให้ผู้ที่เคย delete/hide conversation กลับมาเห็นการสนทนาอีกครั้ง
+	if err := s.conversationRepo.UnhideForAllMembers(conversationID); err != nil {
+		fmt.Printf("Warning: Failed to unhide conversation for members: %v\n", err)
+	}
+
 	// ดึงรายชื่อสมาชิกทั้งหมดในการสนทนา
 	members, err := s.conversationRepo.GetMembers(conversationID)
 	if err != nil {

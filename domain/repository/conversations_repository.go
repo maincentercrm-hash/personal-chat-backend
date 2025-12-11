@@ -99,5 +99,6 @@ type ConversationRepository interface {
 	// GetConversationsAfterID ดึงการสนทนาที่ใหม่กว่า ID ที่ระบุ
 	GetConversationsAfterID(userID, afterID uuid.UUID, limit int, convType string, pinned bool) ([]*models.Conversation, int, error)
 
-
+	// UnhideForAllMembers ยกเลิกการซ่อนการสนทนาสำหรับสมาชิกทุกคน (ใช้เมื่อมีข้อความใหม่)
+	UnhideForAllMembers(conversationID uuid.UUID) error
 }

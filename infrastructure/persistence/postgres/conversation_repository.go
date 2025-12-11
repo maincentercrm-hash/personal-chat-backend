@@ -809,3 +809,21 @@ func (r *conversationRepository) UpdateMember(member *models.ConversationMember)
 	return r.db.Save(member).Error
 }
 
+// UnhideForAllMembers ยกเลิกการซ่อนการสนทนาสำหรับสมาชิกทุกคน
+// ใช้เมื่อมีข้อความใหม่เข้ามา เพื่อให้ผู้ที่เคย delete/hide conversation กลับมาเห็นอีกครั้ง
+func (r *conversationRepository) UnhideForAllMembers(conversationID uuid.UUID) error {
+	result := r.db.Model(&models.ConversationMember{}).
+		Where("conversation_id = ? AND is_hidden = ?", conversationID, true).
+		Updates(map[string]interface{}{
+			"is_hidden": false,
+			"hidden_at": nil,
+		})
+
+	if result.Error != nil {
+		return result.Error
+	}
+
+	// ไม่ต้อง error ถ้าไม่มี row ที่ถูก update (อาจไม่มีใครซ่อนไว้)
+	return nil
+}
+
