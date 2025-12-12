@@ -654,9 +654,10 @@ func (r *messageRepository) SearchMessages(
 	var messages []*models.Message
 
 	// สร้าง base query
+	// ใช้ ILIKE แทน full-text search เพื่อรองรับภาษาไทย (ไม่มี word boundaries)
 	baseQuery := r.db.Model(&models.Message{}).
 		Where("is_deleted = ?", false).
-		Where("content_tsvector @@ plainto_tsquery('english', ?)", searchQuery)
+		Where("content ILIKE ?", "%"+searchQuery+"%")
 
 	// Filter by conversation if specified
 	if conversationID != nil {
