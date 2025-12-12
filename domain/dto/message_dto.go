@@ -176,6 +176,17 @@ type MessageDTO struct {
 	SenderInfo   *UserBasicDTO     `json:"sender_info,omitempty"`
 	BusinessInfo *BusinessBasicDTO `json:"business_info,omitempty"`
 	AdminInfo    *UserBasicDTO     `json:"admin_info,omitempty"`
+
+	// ข้อมูล Conversation สำหรับ Search Results (Telegram-style)
+	Conversation *ConversationBasicDTO `json:"conversation,omitempty"`
+}
+
+// ConversationBasicDTO ข้อมูลพื้นฐานของ Conversation สำหรับ search results
+type ConversationBasicDTO struct {
+	ID      uuid.UUID `json:"id"`
+	Type    string    `json:"type"`    // direct, group, business
+	Title   string    `json:"title"`   // ชื่อ group หรือชื่ออีกฝ่าย (สำหรับ direct)
+	IconURL string    `json:"icon_url,omitempty"`
 }
 
 // UserBasicDTO ข้อมูลพื้นฐานของผู้ใช้

@@ -22,7 +22,7 @@ type MessageService interface {
 	// เพิ่มเมธอดสำหรับ Broadcast Message
 
 	// จัดการข้อความ
-	EditMessage(messageID uuid.UUID, userID uuid.UUID, newContent string) (*models.Message, error)
+	EditMessage(messageID uuid.UUID, userID uuid.UUID, newContent string, metadata map[string]interface{}) (*models.Message, error)
 	DeleteMessage(messageID uuid.UUID, userID uuid.UUID) error
 	ReplyToMessage(replyToID uuid.UUID, userID uuid.UUID, messageType string, content string, mediaURL string, thumbnailURL string, metadata map[string]interface{}) (*models.Message, error)
 

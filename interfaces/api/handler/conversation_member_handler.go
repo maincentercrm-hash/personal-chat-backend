@@ -108,7 +108,12 @@ func (h *ConversationMemberHandler) AddConversationMember(c *fiber.Ctx) error {
 	h.notificationService.NotifyUserAddedToConversation(conversationID, newMemberID)
 
 	// บันทึก activity log
-	h.groupActivityService.LogMemberAdded(conversationID, userID, newMemberID)
+	if err := h.groupActivityService.LogMemberAdded(conversationID, userID, newMemberID); err != nil {
+		// Log error แต่ไม่ fail request (activity log เป็น secondary)
+		println("⚠️ [AddMember] Failed to log activity:", err.Error())
+	} else {
+		println("✅ [AddMember] Activity logged successfully")
+	}
 
 	// 6. ส่งผลลัพธ์กลับ
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
@@ -210,10 +215,15 @@ func (h *ConversationMemberHandler) BulkAddConversationMembers(c *fiber.Ctx) err
 		message = "Some members were added successfully, some failed"
 	}
 
-	// ส่ง WebSocket notification สำหรับแต่ละคนที่ถูกเพิ่มสำเร็จ
+	// ส่ง WebSocket notification และบันทึก activity log สำหรับแต่ละคนที่ถูกเพิ่มสำเร็จ
 	for _, member := range addedMembers {
 		memberUUID, _ := uuid.Parse(member.UserID)
 		h.notificationService.NotifyUserAddedToConversation(conversationID, memberUUID)
+
+		// บันทึก activity log
+		if err := h.groupActivityService.LogMemberAdded(conversationID, userID, memberUUID); err != nil {
+			println("⚠️ [BulkAddMembers] Failed to log activity for member:", member.UserID, err.Error())
+		}
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{

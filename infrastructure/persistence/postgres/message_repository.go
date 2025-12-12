@@ -642,9 +642,11 @@ func (r *messageRepository) FindByDateRange(conversationID uuid.UUID, startDate,
 }
 
 // SearchMessages ค้นหาข้อความโดยใช้ full-text search (CURSOR-BASED)
+// userID ใช้สำหรับ filter เฉพาะ conversations ที่ user เป็นสมาชิก
 func (r *messageRepository) SearchMessages(
 	searchQuery string,
 	conversationID *uuid.UUID,
+	userID uuid.UUID,
 	limit int,
 	cursor *string,
 	direction string,
@@ -659,6 +661,13 @@ func (r *messageRepository) SearchMessages(
 	// Filter by conversation if specified
 	if conversationID != nil {
 		baseQuery = baseQuery.Where("conversation_id = ?", *conversationID)
+	} else {
+		// ถ้าไม่ระบุ conversation_id ให้ค้นหาเฉพาะ conversations ที่ user เป็นสมาชิก (ไม่ถูก hidden)
+		baseQuery = baseQuery.Where("conversation_id IN (?)",
+			r.db.Table("conversation_members").
+				Select("conversation_id").
+				Where("user_id = ? AND is_hidden = false", userID),
+		)
 	}
 
 	// Apply cursor pagination

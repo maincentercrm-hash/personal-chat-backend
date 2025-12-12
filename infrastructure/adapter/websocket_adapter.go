@@ -142,8 +142,14 @@ func (a *WebSocketAdapter) BroadcastUserAddedToConversation(conversationID uuid.
 func (a *WebSocketAdapter) BroadcastUserRemovedFromConversation(userID uuid.UUID, conversationID uuid.UUID) {
 	data := map[string]interface{}{
 		"conversation_id": conversationID,
+		"user_id":         userID,
 		"removed_at":      utils.Now(),
 	}
+
+	// 1. แจ้งสมาชิกอื่นๆในห้องว่ามีคนถูกลบออก (คนที่ยังอยู่ในห้องจะได้รับ)
+	a.BroadcastToConversation(conversationID, "conversation.user_removed", data)
+
+	// 2. แจ้งผู้ใช้ที่ถูกลบออกด้วย (เผื่อยัง subscribe อยู่)
 	a.BroadcastToUser(userID, "conversation.user_removed", data)
 }
 

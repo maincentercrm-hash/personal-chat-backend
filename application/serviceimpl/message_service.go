@@ -277,6 +277,7 @@ func (s *messageService) GetMessagesByDate(conversationID, userID uuid.UUID, dat
 }
 
 // SearchMessages ค้นหาข้อความ (CURSOR-BASED)
+// จะค้นหาเฉพาะ conversations ที่ user เป็นสมาชิกเท่านั้น
 func (s *messageService) SearchMessages(
 	query string,
 	conversationID *uuid.UUID,
@@ -296,8 +297,8 @@ func (s *messageService) SearchMessages(
 		}
 	}
 
-	// ค้นหาข้อความ
-	return s.messageRepo.SearchMessages(query, conversationID, limit, cursor, direction)
+	// ค้นหาข้อความ - ส่ง userID ไปเพื่อ filter เฉพาะ conversations ที่เป็นสมาชิก
+	return s.messageRepo.SearchMessages(query, conversationID, userID, limit, cursor, direction)
 }
 
 // notifyMentionedUsers ส่งการแจ้งเตือนและบันทึกลง database

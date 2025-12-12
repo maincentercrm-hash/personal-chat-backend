@@ -10,9 +10,9 @@ import (
 	"github.com/thizplus/gofiber-chat-api/domain/types"
 )
 
-// EditMessage แก้ไขข้อความ
-func (s *messageService) EditMessage(messageID, userID uuid.UUID, newContent string) (*models.Message, error) {
-	fmt.Printf("🔧 [EditMessage Service] Starting. MessageID: %s, UserID: %s\n", messageID, userID)
+// EditMessage แก้ไขข้อความ (รองรับ metadata สำหรับ mentions)
+func (s *messageService) EditMessage(messageID, userID uuid.UUID, newContent string, metadata map[string]interface{}) (*models.Message, error) {
+	fmt.Printf("🔧 [EditMessage Service] Starting. MessageID: %s, UserID: %s, HasMetadata: %v\n", messageID, userID, metadata != nil)
 
 	// ป้องกัน nil pointer - ตรวจสอบ repository
 	if s.messageRepo == nil {
@@ -87,6 +87,16 @@ func (s *messageService) EditMessage(messageID, userID uuid.UUID, newContent str
 		}
 	}
 
+	// Merge new metadata (mentions) with existing metadata
+	if metadata != nil {
+		if message.Metadata == nil {
+			message.Metadata = make(types.JSONB)
+		}
+		for k, v := range metadata {
+			message.Metadata[k] = v
+		}
+	}
+
 	// อัพเดทข้อความ
 	now := time.Now()
 	message.Content = newContent
@@ -105,6 +115,14 @@ func (s *messageService) EditMessage(messageID, userID uuid.UUID, newContent str
 
 	if err := s.messageRepo.UpdateFields(message.ID, updates); err != nil {
 		return nil, fmt.Errorf("error updating message: %w", err)
+	}
+
+	// ส่งการแจ้งเตือนสำหรับผู้ใช้ที่ถูก mention ใหม่ (จาก edit)
+	if metadata != nil {
+		if mentions, ok := metadata["mentions"]; ok && mentions != nil {
+			fmt.Printf("✅ [EditMessage] Processing mentions for edited message: %v\n", mentions)
+			s.notifyMentionedUsers(message, mentions, userID)
+		}
 	}
 
 	// ตรวจสอบว่าเป็นข้อความล่าสุดของการสนทนาหรือไม่ และอัพเดทหากจำเป็น

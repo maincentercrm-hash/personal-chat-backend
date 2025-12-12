@@ -72,8 +72,9 @@ type MessageRepository interface {
 	FindByDateRange(conversationID uuid.UUID, startDate, endDate time.Time, limit int) ([]*models.Message, int64, error)
 
 	// Search messages (CURSOR-BASED)
+	// userID ใช้สำหรับ filter เฉพาะ conversations ที่ user เป็นสมาชิก
 	// Returns: messages, nextCursor, hasMore, error
-	SearchMessages(searchQuery string, conversationID *uuid.UUID, limit int, cursor *string, direction string) ([]*models.Message, *string, bool, error)
+	SearchMessages(searchQuery string, conversationID *uuid.UUID, userID uuid.UUID, limit int, cursor *string, direction string) ([]*models.Message, *string, bool, error)
 
 	// Bulk/Album messages
 	GetMessagesByAlbumID(albumID string) ([]*models.Message, error)

@@ -147,7 +147,13 @@ func (s *groupActivityService) LogMemberAdded(conversationID, actorID, targetID 
 		CreatedAt:      time.Now(),
 	}
 
-	return s.activityRepo.Create(activity)
+	if err := s.activityRepo.Create(activity); err != nil {
+		println("❌ [LogMemberAdded] Error creating activity:", err.Error())
+		return err
+	}
+
+	println("✅ [LogMemberAdded] Activity created:", activity.ID.String())
+	return nil
 }
 
 // LogMemberRemoved บันทึกการลบสมาชิก

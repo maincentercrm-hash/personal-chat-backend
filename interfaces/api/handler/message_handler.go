@@ -9,6 +9,8 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/thizplus/gofiber-chat-api/domain/dto"
+	"github.com/thizplus/gofiber-chat-api/domain/models"
 	"github.com/thizplus/gofiber-chat-api/domain/repository"
 	"github.com/thizplus/gofiber-chat-api/domain/service"
 	"github.com/thizplus/gofiber-chat-api/domain/types"
@@ -652,7 +654,8 @@ func (h *MessageHandler) EditMessage(c *fiber.Ctx) error {
 
 	// รับข้อมูลการแก้ไขจาก request body
 	var input struct {
-		Content string `json:"content"`
+		Content  string      `json:"content"`
+		Metadata types.JSONB `json:"metadata,omitempty"` // รองรับ mentions ใน edit
 	}
 
 	if err := c.BodyParser(&input); err != nil {
@@ -663,7 +666,7 @@ func (h *MessageHandler) EditMessage(c *fiber.Ctx) error {
 		})
 	}
 
-	fmt.Printf("📝 [EditMessage] New content: %q\n", input.Content)
+	fmt.Printf("📝 [EditMessage] New content: %q, Metadata: %v\n", input.Content, input.Metadata)
 
 	// ตรวจสอบ messageService
 	if h.messageService == nil {
@@ -676,8 +679,8 @@ func (h *MessageHandler) EditMessage(c *fiber.Ctx) error {
 
 	fmt.Printf("📝 [EditMessage] Calling service.EditMessage...\n")
 
-	// เรียกใช้ service
-	message, err := h.messageService.EditMessage(messageID, userID, input.Content)
+	// เรียกใช้ service (ส่ง metadata ไปด้วยสำหรับ mentions)
+	message, err := h.messageService.EditMessage(messageID, userID, input.Content, input.Metadata)
 
 	fmt.Printf("📝 [EditMessage] Service returned. Error: %v, Message: %v\n", err, message != nil)
 
@@ -1127,15 +1130,97 @@ func (h *MessageHandler) SearchMessages(c *fiber.Ctx) error {
 		})
 	}
 
+	// แปลง messages เป็น DTOs พร้อมข้อมูล Conversation (Telegram-style)
+	messageDTOs := h.convertSearchResultsToDTO(messages, userID)
+
 	return c.JSON(fiber.Map{
 		"success": true,
 		"data": fiber.Map{
-			"messages": messages,
+			"messages": messageDTOs,
 			"query":    query,
 			"cursor":   nextCursor,
 			"has_more": hasMore,
 		},
 	})
+}
+
+// convertSearchResultsToDTO แปลง messages เป็น DTOs พร้อมข้อมูล Conversation
+func (h *MessageHandler) convertSearchResultsToDTO(messages []*models.Message, userID uuid.UUID) []*dto.MessageDTO {
+	var result []*dto.MessageDTO
+
+	for _, msg := range messages {
+		msgDTO := &dto.MessageDTO{
+			ID:                msg.ID,
+			ConversationID:    msg.ConversationID,
+			SenderID:          msg.SenderID,
+			SenderType:        msg.SenderType,
+			MessageType:       msg.MessageType,
+			Content:           msg.Content,
+			MediaURL:          msg.MediaURL,
+			MediaThumbnailURL: msg.MediaThumbnailURL,
+			AlbumFiles:        msg.AlbumFiles,
+			Metadata:          msg.Metadata,
+			CreatedAt:         msg.CreatedAt,
+			UpdatedAt:         msg.UpdatedAt,
+			IsDeleted:         msg.IsDeleted,
+			IsEdited:          msg.IsEdited,
+			EditCount:         msg.EditCount,
+			ReplyToID:         msg.ReplyToID,
+			IsForwarded:       msg.IsForwarded,
+		}
+
+		// เพิ่มข้อมูลผู้ส่ง (Sender)
+		if msg.Sender != nil {
+			msgDTO.SenderInfo = &dto.UserBasicDTO{
+				ID:              msg.Sender.ID,
+				Username:        msg.Sender.Username,
+				DisplayName:     msg.Sender.DisplayName,
+				ProfileImageURL: msg.Sender.ProfileImageURL,
+			}
+			// Set sender name/avatar for convenience
+			if msg.Sender.DisplayName != "" {
+				msgDTO.SenderName = msg.Sender.DisplayName
+			} else {
+				msgDTO.SenderName = msg.Sender.Username
+			}
+			msgDTO.SenderAvatar = msg.Sender.ProfileImageURL
+		}
+
+		// เพิ่มข้อมูล Conversation (Telegram-style) - จาก Preload
+		if msg.Conversation != nil {
+			convDTO := &dto.ConversationBasicDTO{
+				ID:      msg.Conversation.ID,
+				Type:    msg.Conversation.Type,
+				Title:   msg.Conversation.Title,
+				IconURL: msg.Conversation.IconURL,
+			}
+
+			// สำหรับ direct chat: ดึงชื่ออีกฝ่ายเป็น title
+			if msg.Conversation.Type == "direct" || msg.Conversation.Type == "private" {
+				// ดึง members ของ conversation
+				members, err := h.conversationRepo.GetMembers(msg.ConversationID)
+				if err == nil && len(members) > 0 {
+					for _, member := range members {
+						if member.UserID != userID && member.User != nil {
+							if member.User.DisplayName != "" {
+								convDTO.Title = member.User.DisplayName
+							} else {
+								convDTO.Title = member.User.Username
+							}
+							convDTO.IconURL = member.User.ProfileImageURL
+							break
+						}
+					}
+				}
+			}
+
+			msgDTO.Conversation = convDTO
+		}
+
+		result = append(result, msgDTO)
+	}
+
+	return result
 }
 
 // ForwardMessages ส่งต่อข้อความไปยังการสนทนาอื่น
