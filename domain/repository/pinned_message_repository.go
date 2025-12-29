@@ -35,6 +35,9 @@ type PinnedMessageRepository interface {
 	// Get public pinned messages count
 	GetPublicPinnedCount(ctx context.Context, conversationID uuid.UUID) (int64, error)
 
+	// Delete oldest public pin in a conversation (for auto-replace when limit reached)
+	DeleteOldestPublicPin(ctx context.Context, conversationID uuid.UUID) error
+
 	// Delete all pinned entries for a specific message (when message is deleted)
 	DeleteAllByMessageID(ctx context.Context, messageID uuid.UUID) error
 

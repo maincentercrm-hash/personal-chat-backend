@@ -1237,6 +1237,7 @@ func (h *MessageHandler) ForwardMessages(c *fiber.Ctx) error {
 	var input struct {
 		MessageIDs            []uuid.UUID `json:"message_ids"`
 		TargetConversationIDs []uuid.UUID `json:"target_conversation_ids"`
+		HideSource            bool        `json:"hide_source"` // ✅ Option to hide original sender info
 	}
 
 	if err := c.BodyParser(&input); err != nil {
@@ -1261,8 +1262,8 @@ func (h *MessageHandler) ForwardMessages(c *fiber.Ctx) error {
 		})
 	}
 
-	// ส่งต่อข้อความ
-	results, err := h.messageService.ForwardMessages(input.MessageIDs, input.TargetConversationIDs, userID)
+	// ส่งต่อข้อความ (รองรับ hide_source option)
+	results, err := h.messageService.ForwardMessages(input.MessageIDs, input.TargetConversationIDs, userID, input.HideSource)
 	if err != nil {
 		statusCode := fiber.StatusInternalServerError
 		if err.Error() == "user is not a member of the source conversation" ||

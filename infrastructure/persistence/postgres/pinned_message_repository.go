@@ -153,6 +153,22 @@ func (r *pinnedMessageRepository) GetPublicPinnedCount(ctx context.Context, conv
 	return count, err
 }
 
+// DeleteOldestPublicPin deletes the oldest public pin in a conversation
+func (r *pinnedMessageRepository) DeleteOldestPublicPin(ctx context.Context, conversationID uuid.UUID) error {
+	// Find the oldest public pin
+	var oldestPin models.PinnedMessage
+	err := r.db.WithContext(ctx).
+		Where("conversation_id = ? AND pin_type = ?", conversationID, models.PinTypePublic).
+		Order("pinned_at ASC").
+		First(&oldestPin).Error
+	if err != nil {
+		return err
+	}
+
+	// Delete it
+	return r.db.WithContext(ctx).Delete(&oldestPin).Error
+}
+
 // DeleteAllByMessageID deletes all pinned entries for a message
 func (r *pinnedMessageRepository) DeleteAllByMessageID(ctx context.Context, messageID uuid.UUID) error {
 	return r.db.WithContext(ctx).

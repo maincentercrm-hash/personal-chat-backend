@@ -46,7 +46,8 @@ func (r *conversationRepository) AddMember(member *models.ConversationMember) er
 // GetMembers ดึงรายการสมาชิกทั้งหมดในการสนทนา
 func (r *conversationRepository) GetMembers(conversationID uuid.UUID) ([]*models.ConversationMember, error) {
 	var members []*models.ConversationMember
-	if err := r.db.Where("conversation_id = ?", conversationID).Find(&members).Error; err != nil {
+	// ✅ FIX: Preload User เพื่อให้ได้ข้อมูล user สำหรับแสดงชื่อใน direct chat
+	if err := r.db.Preload("User").Where("conversation_id = ?", conversationID).Find(&members).Error; err != nil {
 		return nil, err
 	}
 	return members, nil

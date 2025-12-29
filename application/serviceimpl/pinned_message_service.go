@@ -4,6 +4,7 @@ package serviceimpl
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,7 +16,7 @@ import (
 )
 
 // Maximum public pins per conversation
-const MaxPublicPinnedMessages = 5
+const MaxPublicPinnedMessages = 20
 
 type pinnedMessageService struct {
 	pinnedRepo       repository.PinnedMessageRepository
@@ -70,30 +71,22 @@ func (s *pinnedMessageService) PinMessage(ctx context.Context, conversationID, m
 		return nil, errors.New("user is not a member of this conversation")
 	}
 
-	// For public pins, check permissions (only owner/admin in group)
+	// For public pins, check max limit and auto-replace oldest if exceeded
 	if pinType == models.PinTypePublic {
-		conversation, err := s.conversationRepo.GetByID(conversationID)
-		if err != nil {
-			return nil, err
-		}
-
-		if conversation.Type == "group" {
-			member, err := s.conversationRepo.GetMember(conversationID, userID)
-			if err != nil {
-				return nil, err
-			}
-			if member == nil || (member.Role != "owner" && member.Role != "admin") {
-				return nil, errors.New("only owner/admin can create public pins in group conversations")
-			}
-		}
+		// ✅ FIX: ลบการจำกัดสิทธิ์ owner/admin - สมาชิกทุกคนสามารถ pin public ได้
 
 		// Check max public pins limit
 		publicCount, err := s.pinnedRepo.GetPublicPinnedCount(ctx, conversationID)
 		if err != nil {
 			return nil, err
 		}
+
+		// ✅ FIX: ถ้าเกิน limit → ลบอันเก่าสุดออกอัตโนมัติ
 		if publicCount >= MaxPublicPinnedMessages {
-			return nil, errors.New("maximum public pins limit reached (5)")
+			// Get oldest public pin and delete it
+			if err := s.pinnedRepo.DeleteOldestPublicPin(ctx, conversationID); err != nil {
+				return nil, fmt.Errorf("failed to remove oldest pin: %w", err)
+			}
 		}
 	}
 
@@ -155,34 +148,14 @@ func (s *pinnedMessageService) UnpinMessage(ctx context.Context, conversationID,
 		return errors.New("user is not a member of this conversation")
 	}
 
-	// For personal pins, user can only unpin their own
-	if pinType == models.PinTypePersonal {
-		return s.pinnedRepo.Delete(ctx, messageID, userID, pinType)
-	}
-
-	// For public pins, check permissions
-	conversation, err := s.conversationRepo.GetByID(conversationID)
-	if err != nil {
-		return err
-	}
-
-	if conversation.Type == "group" {
-		member, err := s.conversationRepo.GetMember(conversationID, userID)
-		if err != nil {
-			return err
-		}
-		if member == nil || (member.Role != "owner" && member.Role != "admin") {
-			return errors.New("only owner/admin can remove public pins in group conversations")
-		}
-	}
-
-	// Delete the public pin (any user who created it)
+	// ✅ FIX: ทั้ง personal และ public - เฉพาะคนที่ pin เท่านั้นถึงจะ unpin ได้
+	// Delete the pin (user can only unpin their own pins)
 	if err := s.pinnedRepo.Delete(ctx, messageID, userID, pinType); err != nil {
 		return err
 	}
 
-	// Broadcast WebSocket event for public unpins
-	if s.wsPort != nil {
+	// Broadcast WebSocket event for public unpins only
+	if pinType == models.PinTypePublic && s.wsPort != nil {
 		s.wsPort.BroadcastMessageUnpinned(conversationID, messageID, userID)
 	}
 
@@ -252,14 +225,33 @@ func (s *pinnedMessageService) toPinnedMessageDTO(pm *models.PinnedMessage) *dto
 	// Add message info
 	if pm.Message != nil {
 		result.Message = &dto.MessageDTO{
-			ID:             pm.Message.ID,
-			ConversationID: pm.Message.ConversationID,
-			SenderID:       pm.Message.SenderID,
-			MessageType:    pm.Message.MessageType,
-			Content:        pm.Message.Content,
-			MediaURL:       pm.Message.MediaURL,
-			CreatedAt:      pm.Message.CreatedAt,
-			UpdatedAt:      pm.Message.UpdatedAt,
+			ID:                pm.Message.ID,
+			ConversationID:    pm.Message.ConversationID,
+			SenderID:          pm.Message.SenderID,
+			MessageType:       pm.Message.MessageType,
+			Content:           pm.Message.Content,
+			MediaURL:          pm.Message.MediaURL,
+			MediaThumbnailURL: pm.Message.MediaThumbnailURL,
+			CreatedAt:         pm.Message.CreatedAt,
+			UpdatedAt:         pm.Message.UpdatedAt,
+		}
+
+		// ✅ FIX: เพิ่ม AlbumFiles สำหรับ album messages
+		if pm.Message.MessageType == "album" && pm.Message.AlbumFiles != nil {
+			result.Message.AlbumFiles = pm.Message.AlbumFiles
+		}
+
+		// ✅ FIX: เพิ่ม File info สำหรับ file messages
+		if pm.Message.MessageType == "file" && pm.Message.Metadata != nil {
+			if fileName, ok := pm.Message.Metadata["file_name"].(string); ok {
+				result.Message.FileName = fileName
+			}
+			if fileSize, ok := pm.Message.Metadata["file_size"].(float64); ok {
+				result.Message.FileSize = int64(fileSize)
+			}
+			if fileType, ok := pm.Message.Metadata["file_type"].(string); ok {
+				result.Message.FileType = fileType
+			}
 		}
 
 		if pm.Message.Sender != nil {

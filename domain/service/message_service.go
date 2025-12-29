@@ -42,9 +42,9 @@ type MessageService interface {
 	// Returns: messages, nextCursor, hasMore, error
 	SearchMessages(query string, conversationID *uuid.UUID, userID uuid.UUID, limit int, cursor *string, direction string) ([]*models.Message, *string, bool, error)
 
-	// Forward messages
-	ForwardMessage(messageID, targetConversationID, userID uuid.UUID) (*models.Message, error)
-	ForwardMessages(messageIDs []uuid.UUID, targetConversationIDs []uuid.UUID, userID uuid.UUID) (map[uuid.UUID][]*models.Message, error)
+	// Forward messages (hideSource = true จะไม่แสดงข้อมูลผู้ส่งต้นฉบับ)
+	ForwardMessage(messageID, targetConversationID, userID uuid.UUID, hideSource bool) (*models.Message, error)
+	ForwardMessages(messageIDs []uuid.UUID, targetConversationIDs []uuid.UUID, userID uuid.UUID, hideSource bool) (map[uuid.UUID][]*models.Message, error)
 
 	// ตรวจสอบสิทธิ์
 }

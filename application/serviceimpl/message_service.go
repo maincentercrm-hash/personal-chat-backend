@@ -118,7 +118,7 @@ func (s *messageService) extractLinks(content string) []string {
 	return result
 }
 
-// PinMessage ปักหมุดข้อความ (เฉพาะ owner/admin ที่ pin ได้สำหรับกลุ่ม)
+// PinMessage ปักหมุดข้อความ (สมาชิกทุกคนสามารถ pin ได้)
 func (s *messageService) PinMessage(messageID, conversationID, userID uuid.UUID) error {
 	// ตรวจสอบว่า message อยู่ในการสนทนานี้
 	message, err := s.messageRepo.GetByID(messageID)
@@ -141,31 +141,12 @@ func (s *messageService) PinMessage(messageID, conversationID, userID uuid.UUID)
 		return errors.New("user is not a member of this conversation")
 	}
 
-	// ดึงข้อมูลการสนทนา
-	conversation, err := s.conversationRepo.GetByID(conversationID)
-	if err != nil {
-		return err
-	}
-
-	// ถ้าเป็นกลุ่ม ต้องเป็น owner/admin เท่านั้น
-	if conversation.Type == "group" {
-		member, err := s.conversationRepo.GetMember(conversationID, userID)
-		if err != nil {
-			return err
-		}
-		if member == nil {
-			return errors.New("user is not a member of this conversation")
-		}
-		if member.Role != "owner" && member.Role != "admin" {
-			return errors.New("only owner/admin can pin messages in group conversations")
-		}
-	}
-
+	// ✅ FIX: สมาชิกทุกคนสามารถ pin message ได้ (ไม่จำกัดเฉพาะ owner/admin)
 	// ปักหมุดข้อความ
 	return s.messageRepo.PinMessage(messageID, userID)
 }
 
-// UnpinMessage ยกเลิกการปักหมุดข้อความ
+// UnpinMessage ยกเลิกการปักหมุดข้อความ (เฉพาะคนที่ pin เท่านั้น)
 func (s *messageService) UnpinMessage(messageID, conversationID, userID uuid.UUID) error {
 	// ตรวจสอบว่า message อยู่ในการสนทนานี้
 	message, err := s.messageRepo.GetByID(messageID)
@@ -188,29 +169,9 @@ func (s *messageService) UnpinMessage(messageID, conversationID, userID uuid.UUI
 		return errors.New("user is not a member of this conversation")
 	}
 
-	// ดึงข้อมูลการสนทนา
-	conversation, err := s.conversationRepo.GetByID(conversationID)
-	if err != nil {
-		return err
-	}
-
-	// ถ้าเป็นกลุ่ม ต้องเป็น owner/admin หรือคนที่ pin เอง
-	if conversation.Type == "group" {
-		member, err := s.conversationRepo.GetMember(conversationID, userID)
-		if err != nil {
-			return err
-		}
-		if member == nil {
-			return errors.New("user is not a member of this conversation")
-		}
-
-		// อนุญาตให้ unpin ได้ถ้าเป็น owner/admin หรือคนที่ pin เอง
-		isAuthorized := member.Role == "owner" || member.Role == "admin" ||
-			(message.PinnedBy != nil && *message.PinnedBy == userID)
-
-		if !isAuthorized {
-			return errors.New("only owner/admin or the user who pinned can unpin messages")
-		}
+	// ✅ FIX: เฉพาะคนที่ pin เท่านั้นถึงจะ unpin ได้
+	if message.PinnedBy == nil || *message.PinnedBy != userID {
+		return errors.New("only the user who pinned can unpin this message")
 	}
 
 	// ยกเลิกการปักหมุด
@@ -243,14 +204,15 @@ func (s *messageService) GetMessagesByDate(conversationID, userID uuid.UUID, dat
 		return nil, 0, false, false, errors.New("user is not a member of this conversation")
 	}
 
-	// Parse date string (YYYY-MM-DD)
-	date, err := time.Parse("2006-01-02", dateStr)
+	// Parse date string (YYYY-MM-DD) with Bangkok timezone
+	loc, _ := time.LoadLocation("Asia/Bangkok")
+	date, err := time.ParseInLocation("2006-01-02", dateStr, loc)
 	if err != nil {
 		return nil, 0, false, false, errors.New("invalid date format, use YYYY-MM-DD")
 	}
 
-	// สร้างช่วงเวลาสำหรับวันนั้น
-	startOfDay := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
+	// สร้างช่วงเวลาสำหรับวันนั้น (ใช้ Bangkok timezone)
+	startOfDay := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, loc)
 	endOfDay := startOfDay.Add(24 * time.Hour)
 
 	// ดึงข้อความในวันนั้น
@@ -268,7 +230,8 @@ func (s *messageService) GetMessagesByDate(conversationID, userID uuid.UUID, dat
 
 	// ตรวจสอบว่ามีข้อความหลังจากนี้หรือไม่
 	hasMoreAfter := false
-	afterMessages, _, err := s.messageRepo.FindByDateRange(conversationID, endOfDay, time.Now().Add(24*time.Hour), 1)
+	now := time.Now().In(loc)
+	afterMessages, _, err := s.messageRepo.FindByDateRange(conversationID, endOfDay, now.Add(24*time.Hour), 1)
 	if err == nil && len(afterMessages) > 0 {
 		hasMoreAfter = true
 	}
@@ -406,7 +369,7 @@ func truncateString(s string, maxLen int) string {
 }
 
 // ForwardMessage ส่งต่อข้อความไปยังการสนทนาอื่น
-func (s *messageService) ForwardMessage(messageID, targetConversationID, userID uuid.UUID) (*models.Message, error) {
+func (s *messageService) ForwardMessage(messageID, targetConversationID, userID uuid.UUID, hideSource bool) (*models.Message, error) {
 	// ดึงข้อความต้นฉบับ
 	originalMsg, err := s.messageRepo.GetByID(messageID)
 	if err != nil {
@@ -434,28 +397,6 @@ func (s *messageService) ForwardMessage(messageID, targetConversationID, userID 
 		return nil, errors.New("user is not a member of the target conversation")
 	}
 
-	// สร้างข้อมูล forwarded_from
-	forwardedFrom := types.JSONB{
-		"message_id":         originalMsg.ID.String(),
-		"conversation_id":    originalMsg.ConversationID.String(),
-		"original_timestamp": originalMsg.CreatedAt.Format(time.RFC3339),
-	}
-	if originalMsg.SenderID != nil {
-		forwardedFrom["sender_id"] = originalMsg.SenderID.String()
-
-		// ดึงข้อมูลผู้ส่งต้นฉบับเพื่อเอา sender_name
-		if s.userRepo != nil {
-			originalSender, err := s.userRepo.FindByID(*originalMsg.SenderID)
-			if err == nil && originalSender != nil {
-				senderName := originalSender.DisplayName
-				if senderName == "" {
-					senderName = originalSender.Username
-				}
-				forwardedFrom["sender_name"] = senderName
-			}
-		}
-	}
-
 	// สร้างข้อความใหม่
 	now := time.Now()
 	forwardedMsg := &models.Message{
@@ -469,11 +410,38 @@ func (s *messageService) ForwardMessage(messageID, targetConversationID, userID 
 		MediaThumbnailURL: originalMsg.MediaThumbnailURL,
 		AlbumFiles:        originalMsg.AlbumFiles, // Copy album files for album messages
 		Metadata:          originalMsg.Metadata,
-		IsForwarded:       true,
-		ForwardedFrom:     forwardedFrom,
 		CreatedAt:         now,
 		UpdatedAt:         now,
 		IsDeleted:         false,
+	}
+
+	// ✅ FIX: ถ้า hideSource = true → ข้อความธรรมดา (ไม่มี forwarded indicator)
+	// ถ้า hideSource = false → แสดง "ส่งต่อจาก..."
+	if !hideSource {
+		forwardedFrom := types.JSONB{
+			"message_id":         originalMsg.ID.String(),
+			"conversation_id":    originalMsg.ConversationID.String(),
+			"original_timestamp": originalMsg.CreatedAt.Format(time.RFC3339),
+		}
+
+		if originalMsg.SenderID != nil {
+			forwardedFrom["sender_id"] = originalMsg.SenderID.String()
+
+			// ดึงข้อมูลผู้ส่งต้นฉบับเพื่อเอา sender_name
+			if s.userRepo != nil {
+				originalSender, err := s.userRepo.FindByID(*originalMsg.SenderID)
+				if err == nil && originalSender != nil {
+					senderName := originalSender.DisplayName
+					if senderName == "" {
+						senderName = originalSender.Username
+					}
+					forwardedFrom["sender_name"] = senderName
+				}
+			}
+		}
+
+		forwardedMsg.IsForwarded = true
+		forwardedMsg.ForwardedFrom = forwardedFrom
 	}
 
 	// บันทึกข้อความ
@@ -494,11 +462,20 @@ func (s *messageService) ForwardMessage(messageID, targetConversationID, userID 
 	_ = s.conversationRepo.UpdateMemberLastRead(targetConversationID, userID, now)
 
 	// อัปเดตข้อความล่าสุดของการสนทนา
-	lastMsgText := "[Forwarded] "
+	// ✅ FIX: ถ้า hideSource = true ไม่ต้องมี "[Forwarded]" prefix
+	var lastMsgText string
 	if originalMsg.MessageType == "text" {
-		lastMsgText += originalMsg.Content
+		if hideSource {
+			lastMsgText = originalMsg.Content
+		} else {
+			lastMsgText = "[Forwarded] " + originalMsg.Content
+		}
 	} else {
-		lastMsgText += "[" + originalMsg.MessageType + "]"
+		if hideSource {
+			lastMsgText = "[" + originalMsg.MessageType + "]"
+		} else {
+			lastMsgText = "[Forwarded] [" + originalMsg.MessageType + "]"
+		}
 	}
 	_ = s.messageRepo.UpdateConversationLastMessage(targetConversationID, lastMsgText, now, forwardedMsg.ID)
 
@@ -509,7 +486,7 @@ func (s *messageService) ForwardMessage(messageID, targetConversationID, userID 
 }
 
 // ForwardMessages ส่งต่อหลายข้อความไปยังหลายการสนทนา
-func (s *messageService) ForwardMessages(messageIDs []uuid.UUID, targetConversationIDs []uuid.UUID, userID uuid.UUID) (map[uuid.UUID][]*models.Message, error) {
+func (s *messageService) ForwardMessages(messageIDs []uuid.UUID, targetConversationIDs []uuid.UUID, userID uuid.UUID, hideSource bool) (map[uuid.UUID][]*models.Message, error) {
 	if len(messageIDs) == 0 {
 		return nil, errors.New("no messages to forward")
 	}
@@ -523,7 +500,7 @@ func (s *messageService) ForwardMessages(messageIDs []uuid.UUID, targetConversat
 	// Forward แต่ละข้อความไปยังทุกการสนทนาปลายทาง
 	for _, msgID := range messageIDs {
 		for _, targetConvID := range targetConversationIDs {
-			forwardedMsg, err := s.ForwardMessage(msgID, targetConvID, userID)
+			forwardedMsg, err := s.ForwardMessage(msgID, targetConvID, userID, hideSource)
 			if err != nil {
 				// ถ้า forward ไม่สำเร็จก็ข้ามไป (fail silently หรือจะ log error ก็ได้)
 				continue
