@@ -36,7 +36,8 @@ type MessageService interface {
 	GetPinnedMessages(conversationID, userID uuid.UUID, limit, offset int) ([]*models.Message, int64, error)
 
 	// Jump to date
-	GetMessagesByDate(conversationID, userID uuid.UUID, date string, limit int) ([]*models.Message, int64, bool, bool, error)
+	// Returns: messages, total, hasMoreBefore, hasMoreAfter, actualDate (วันที่จริงที่ใช้ - อาจต่างจาก request ถ้าวันนั้นไม่มีข้อความ), error
+	GetMessagesByDate(conversationID, userID uuid.UUID, date string, limit int) ([]*models.Message, int64, bool, bool, string, error)
 
 	// Search messages (CURSOR-BASED)
 	// Returns: messages, nextCursor, hasMore, error

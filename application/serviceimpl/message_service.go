@@ -194,31 +194,56 @@ func (s *messageService) GetPinnedMessages(conversationID, userID uuid.UUID, lim
 }
 
 // GetMessagesByDate ดึงข้อความตามวันที่กำหนด
-func (s *messageService) GetMessagesByDate(conversationID, userID uuid.UUID, dateStr string, limit int) ([]*models.Message, int64, bool, bool, error) {
+// ถ้าไม่มีข้อความในวันที่เลือก จะหาวันที่ใกล้ที่สุดที่มีข้อความก่อนหน้านั้นแทน
+// Returns: messages, total, hasMoreBefore, hasMoreAfter, actualDate, error
+func (s *messageService) GetMessagesByDate(conversationID, userID uuid.UUID, dateStr string, limit int) ([]*models.Message, int64, bool, bool, string, error) {
 	// ตรวจสอบว่า user เป็นสมาชิกของการสนทนา
 	isMember, err := s.conversationRepo.IsMember(conversationID, userID)
 	if err != nil {
-		return nil, 0, false, false, err
+		return nil, 0, false, false, "", err
 	}
 	if !isMember {
-		return nil, 0, false, false, errors.New("user is not a member of this conversation")
+		return nil, 0, false, false, "", errors.New("user is not a member of this conversation")
 	}
 
 	// Parse date string (YYYY-MM-DD) with Bangkok timezone
 	loc, _ := time.LoadLocation("Asia/Bangkok")
 	date, err := time.ParseInLocation("2006-01-02", dateStr, loc)
 	if err != nil {
-		return nil, 0, false, false, errors.New("invalid date format, use YYYY-MM-DD")
+		return nil, 0, false, false, "", errors.New("invalid date format, use YYYY-MM-DD")
 	}
 
 	// สร้างช่วงเวลาสำหรับวันนั้น (ใช้ Bangkok timezone)
 	startOfDay := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, loc)
 	endOfDay := startOfDay.Add(24 * time.Hour)
 
+	// เก็บวันที่จริงที่ใช้ (อาจเปลี่ยนถ้าต้อง fallback)
+	actualDate := dateStr
+
 	// ดึงข้อความในวันนั้น
 	messages, total, err := s.messageRepo.FindByDateRange(conversationID, startOfDay, endOfDay, limit)
 	if err != nil {
-		return nil, 0, false, false, err
+		return nil, 0, false, false, "", err
+	}
+
+	// ถ้าไม่มีข้อความในวันที่เลือก ให้หาวันที่ใกล้ที่สุดก่อนหน้านั้น
+	if len(messages) == 0 {
+		nearestMsg, err := s.messageRepo.FindNearestMessageBeforeDate(conversationID, startOfDay)
+		if err == nil && nearestMsg != nil {
+			// ใช้วันที่ของข้อความที่พบเป็นวันใหม่
+			nearestDate := nearestMsg.CreatedAt.In(loc)
+			startOfDay = time.Date(nearestDate.Year(), nearestDate.Month(), nearestDate.Day(), 0, 0, 0, 0, loc)
+			endOfDay = startOfDay.Add(24 * time.Hour)
+
+			// อัพเดท actualDate เป็นวันที่ใหม่
+			actualDate = startOfDay.Format("2006-01-02")
+
+			// ดึงข้อความในวันที่ใกล้เคียง
+			messages, total, err = s.messageRepo.FindByDateRange(conversationID, startOfDay, endOfDay, limit)
+			if err != nil {
+				return nil, 0, false, false, "", err
+			}
+		}
 	}
 
 	// ตรวจสอบว่ามีข้อความก่อนหน้าหรือไม่
@@ -236,7 +261,7 @@ func (s *messageService) GetMessagesByDate(conversationID, userID uuid.UUID, dat
 		hasMoreAfter = true
 	}
 
-	return messages, total, hasMoreBefore, hasMoreAfter, nil
+	return messages, total, hasMoreBefore, hasMoreAfter, actualDate, nil
 }
 
 // SearchMessages ค้นหาข้อความ (CURSOR-BASED)

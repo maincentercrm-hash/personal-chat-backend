@@ -70,6 +70,8 @@ type MessageRepository interface {
 
 	// Jump to date
 	FindByDateRange(conversationID uuid.UUID, startDate, endDate time.Time, limit int) ([]*models.Message, int64, error)
+	// Find nearest message before a specific date (for fallback when no messages on selected date)
+	FindNearestMessageBeforeDate(conversationID uuid.UUID, beforeDate time.Time) (*models.Message, error)
 
 	// Search messages (CURSOR-BASED)
 	// userID ใช้สำหรับ filter เฉพาะ conversations ที่ user เป็นสมาชิก

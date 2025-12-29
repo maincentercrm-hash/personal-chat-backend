@@ -1219,7 +1219,8 @@ func (h *ConversationHandler) GetMessagesByDate(c *fiber.Ctx) error {
 	}
 
 	// ดึงข้อความตามวันที่
-	messages, total, hasMoreBefore, hasMoreAfter, err := h.messageService.GetMessagesByDate(conversationID, userID, dateStr, limit)
+	// actualDate = วันที่จริงที่ใช้ (อาจต่างจาก dateStr ถ้าวันที่เลือกไม่มีข้อความ)
+	messages, total, hasMoreBefore, hasMoreAfter, actualDate, err := h.messageService.GetMessagesByDate(conversationID, userID, dateStr, limit)
 	if err != nil {
 		statusCode := fiber.StatusInternalServerError
 		if err.Error() == "user is not a member of this conversation" {
@@ -1238,7 +1239,8 @@ func (h *ConversationHandler) GetMessagesByDate(c *fiber.Ctx) error {
 		"success": true,
 		"data": fiber.Map{
 			"messages":        messages,
-			"date":            dateStr,
+			"date":            actualDate, // ใช้วันที่จริงที่ดึงข้อความมา
+			"requested_date":  dateStr,    // วันที่ที่ user request
 			"total":           total,
 			"has_more_before": hasMoreBefore,
 			"has_more_after":  hasMoreAfter,

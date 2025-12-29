@@ -641,6 +641,26 @@ func (r *messageRepository) FindByDateRange(conversationID uuid.UUID, startDate,
 	return messages, total, nil
 }
 
+// FindNearestMessageBeforeDate หาข้อความที่ใกล้ที่สุดก่อนวันที่กำหนด
+func (r *messageRepository) FindNearestMessageBeforeDate(conversationID uuid.UUID, beforeDate time.Time) (*models.Message, error) {
+	var message models.Message
+
+	// หาข้อความล่าสุดที่อยู่ก่อนวันที่กำหนด
+	err := r.db.
+		Preload("Sender").
+		Where("conversation_id = ? AND created_at < ? AND is_deleted = ?",
+			conversationID, beforeDate, false).
+		Order("created_at DESC").
+		Limit(1).
+		First(&message).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &message, nil
+}
+
 // SearchMessages ค้นหาข้อความโดยใช้ full-text search (CURSOR-BASED)
 // userID ใช้สำหรับ filter เฉพาะ conversations ที่ user เป็นสมาชิก
 func (r *messageRepository) SearchMessages(
